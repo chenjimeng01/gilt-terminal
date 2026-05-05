@@ -27,7 +27,7 @@ const UA =
 const OUT_PATH = "public/gilt-prices.json";
 
 // Per-request timeout.
-const FETCH_TIMEOUT_MS = 15000;
+const FETCH_TIMEOUT_MS = 60000;
 
 // Skip writing if we matched fewer than this many gilts (preserve previous good file).
 const MIN_MATCHES = 60;
