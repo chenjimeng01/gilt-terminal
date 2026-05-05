@@ -2,7 +2,9 @@ name: Refresh gilt prices
 
 on:
   schedule:
-    # 18:00 UTC, Mon-Fri. The DMO publishes after the LSE close.
+    # 18:00 UTC, Mon-Fri. The DMO publishes after the LSE close
+    # (16:30 UK local). 18:00 UTC = 18:00 GMT / 19:00 BST, comfortably
+    # after the file is updated.
     - cron: "0 18 * * 1-5"
   workflow_dispatch: {}
 
@@ -18,12 +20,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Rebuild gilt-prices.json
+      - name: Install xlsx
+        run: npm install xlsx@^0.18.5 --no-save --no-audit --no-fund
+
+      - name: Fetch DMO file and rebuild gilt-prices.json
         run: node scripts/refresh-gilt-prices.js
 
       - name: Commit if changed
