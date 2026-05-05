@@ -1,28 +1,39 @@
 // Refresh script for Gilt Terminal.
 //
-// Fetches the UK Debt Management Office "Daily Reference Prices" CSV,
-// extracts clean prices for each gilt the terminal tracks, and writes
-// public/gilt-prices.json keyed by the terminal's `sym` identifier.
+// Fetches the latest LSE close price for each tracked gilt via Yahoo
+// Finance's public chart endpoint and writes public/gilt-prices.json.
+// Each UK gilt's LSE EPIC code maps to <code>.L on Yahoo.
 //
 // Run by .github/workflows/refresh-gilt-prices.yml at 18:00 UTC Mon-Fri.
 // Pure Node 20 (uses built-in fetch) so no `npm install` step is needed.
 //
-// If the DMO URL or column layout changes, see notes at the bottom for
-// the next-best free sources (Yahoo Finance, BoE curve, Tradeweb PDFs).
+// If Yahoo blocks unauthenticated traffic, see notes at the bottom for
+// alternative free sources.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ── Config ────────────────────────────────────────────────────────────────
-const DMO_URL =
-  "https://www.dmo.gov.uk/data/ExportData/?reportCode=D1A&exportFormat=csv";
+
+const YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart";
+const UA =
+  "Mozilla/5.0 (compatible; gilt-terminal-refresh/1.0; +https://github.com/chenjimeng01/gilt-terminal)";
 
 // Output path, relative to repo root.
 const OUT_PATH = "public/gilt-prices.json";
 
-// Gilts the terminal tracks. Match key is (coupon, maturity).
-// Keep this list in sync with MASTER in GiltTerminal.jsx.
+// Polite delay between Yahoo requests (ms).
+const REQUEST_DELAY_MS = 80;
+
+// Per-request timeout.
+const FETCH_TIMEOUT_MS = 8000;
+
+// Skip writing if we matched fewer than this many gilts (preserve previous good file).
+const MIN_MATCHES = 30;
+
+// Gilts the terminal tracks. `sym` is the LSE EPIC code; on Yahoo Finance
+// the ticker is `<sym>.L`.
 const GILTS = [
   { sym: "TN34", c: 4.25,  mat: "2034-07-31" },
   { sym: "TG40", c: 4.375, mat: "2040-01-31" },
@@ -95,214 +106,89 @@ const GILTS = [
   { sym: "TR73", c: 1.125, mat: "2073-10-22" },
 ];
 
-// ── CSV utilities ─────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────
 
-// Minimal RFC-4180-ish parser. Handles quoted fields with embedded commas
-// and escaped double quotes. Adequate for DMO-style files.
-function parseCsv(text) {
-  // Strip BOM and normalise newlines.
-  text = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let i = 0;
-  let inQuotes = false;
-  while (i < text.length) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') { cell += '"'; i += 2; continue; }
-        inQuotes = false; i++; continue;
-      }
-      cell += ch; i++; continue;
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Yahoo quotes UK gilts in pence (GBp) per £100 nominal — e.g. 9251 means
+// £92.51. Sometimes the meta block reports values already in GBP. We
+// detect by magnitude: any price > 250 is assumed pence and divided by 100.
+function normalisePrice(px) {
+  if (!Number.isFinite(px)) return NaN;
+  if (px > 250) return +(px / 100).toFixed(4);
+  if (px <= 0) return NaN;
+  return +px.toFixed(4);
+}
+
+async function fetchYahoo(sym) {
+  const url = `${YAHOO_CHART}/${sym}.L?interval=1d&range=5d`;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA, "Accept": "application/json" },
+      signal: ctl.signal,
+    });
+    if (!res.ok) return { sym, error: `HTTP ${res.status}` };
+    const json = await res.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) {
+      const errDesc = json?.chart?.error?.description || "no result";
+      return { sym, error: errDesc };
     }
-    if (ch === '"') { inQuotes = true; i++; continue; }
-    if (ch === ",") { row.push(cell); cell = ""; i++; continue; }
-    if (ch === "\n") {
-      row.push(cell); rows.push(row); row = []; cell = ""; i++; continue;
-    }
-    cell += ch; i++;
+    const meta = result.meta || {};
+    const closes = result.indicators?.quote?.[0]?.close || [];
+    const lastClose = [...closes].reverse().find(v => v != null);
+    const raw = meta.regularMarketPrice ?? lastClose;
+    const px = normalisePrice(raw);
+    if (!Number.isFinite(px)) return { sym, error: `bad price (raw ${raw})` };
+    return { sym, price: px, currency: meta.currency || null };
+  } catch (e) {
+    return { sym, error: e.name === "AbortError" ? "timeout" : (e.message || String(e)) };
+  } finally {
+    clearTimeout(t);
   }
-  if (cell.length || row.length) { row.push(cell); rows.push(row); }
-  return rows.filter(r => r.some(c => c.trim() !== ""));
-}
-
-// Header detection: find the first row that contains a redemption-date-ish
-// header AND a price-ish header. DMO sometimes prefixes the file with a
-// title row, so skipping until we find a real header is safer than
-// assuming row 0.
-const DATE_HDRS  = ["redemption date", "redemption", "redemption_date", "maturity"];
-const PRICE_HDRS = ["clean price", "clean_price", "close of business clean price", "close clean price", "price (clean)"];
-const COUPON_HDRS = ["coupon", "coupon (%)", "coupon%", "coupon rate"];
-const NAME_HDRS  = ["gilt name", "stock description", "instrument", "name", "gilt"];
-
-function lc(s) { return String(s ?? "").trim().toLowerCase(); }
-
-function findHeaderRowIdx(rows) {
-  for (let i = 0; i < Math.min(rows.length, 30); i++) {
-    const lower = rows[i].map(lc);
-    const hasDate  = DATE_HDRS.some(h => lower.includes(h));
-    const hasPrice = PRICE_HDRS.some(h => lower.includes(h));
-    if (hasDate && hasPrice) return i;
-  }
-  return -1;
-}
-
-function pickColumn(headerRow, candidates) {
-  const lower = headerRow.map(lc);
-  for (const c of candidates) {
-    const idx = lower.indexOf(c);
-    if (idx !== -1) return idx;
-  }
-  // fuzzy fallback: first header that contains a candidate word
-  for (let i = 0; i < lower.length; i++) {
-    if (candidates.some(c => lower[i].includes(c))) return i;
-  }
-  return -1;
-}
-
-// Parse a coupon string like "4 1/4", "4.25", "4 1/4%", "4 ⅛%" to a number.
-function parseCoupon(s) {
-  if (s == null) return NaN;
-  let t = String(s).trim().replace("%", "").trim();
-  // Replace common Unicode vulgar fractions.
-  const FR = { "⅛": "1/8", "¼": "1/4", "⅜": "3/8", "½": "1/2", "⅝": "5/8", "¾": "3/4", "⅞": "7/8" };
-  for (const [k, v] of Object.entries(FR)) t = t.replace(k, " " + v);
-  t = t.replace(/\s+/g, " ").trim();
-  const m = t.match(/^(\d+(?:\.\d+)?)(?:\s+(\d+)\/(\d+))?$/);
-  if (m) {
-    const whole = parseFloat(m[1]);
-    const frac  = m[2] ? parseInt(m[2], 10) / parseInt(m[3], 10) : 0;
-    return whole + frac;
-  }
-  // Last resort: parseFloat ignores trailing junk.
-  const f = parseFloat(t);
-  return Number.isFinite(f) ? f : NaN;
-}
-
-// Parse "31/07/2034", "31-Jul-2034", "2034-07-31", etc. → "YYYY-MM-DD".
-function parseDate(s) {
-  if (!s) return null;
-  const t = String(s).trim();
-  let m;
-
-  // ISO already
-  m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-
-  // DD/MM/YYYY or D/M/YYYY
-  m = t.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/);
-  if (m) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
-
-  // DD-MMM-YYYY or D-MMM-YYYY
-  m = t.match(/^(\d{1,2})[- ]([A-Za-z]{3,9})[- ](\d{4})$/);
-  if (m) {
-    const mo = monthIdx(m[2]);
-    if (mo !== -1) return `${m[3]}-${pad2(mo + 1)}-${pad2(m[1])}`;
-  }
-  return null;
-}
-function pad2(n) { return String(n).padStart(2, "0"); }
-function monthIdx(s) {
-  const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
-  return months.indexOf(s.slice(0, 3).toLowerCase());
-}
-
-function parseNumber(s) {
-  if (s == null) return NaN;
-  const t = String(s).replace(/,/g, "").replace(/£/g, "").trim();
-  const f = parseFloat(t);
-  return Number.isFinite(f) ? f : NaN;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`Fetching: ${DMO_URL}`);
-  const res = await fetch(DMO_URL, {
-    headers: { "User-Agent": "gilt-terminal-refresh/1.0 (+github actions)" },
-  });
-  if (!res.ok) throw new Error(`DMO fetch failed: HTTP ${res.status}`);
-  const csv = await res.text();
-  if (csv.length < 200) throw new Error(`DMO response suspiciously small (${csv.length} bytes)`);
-
-  const rows = parseCsv(csv);
-  const hdrIdx = findHeaderRowIdx(rows);
-  if (hdrIdx === -1) {
-    console.error("First 10 rows of response:");
-    console.error(rows.slice(0, 10));
-    throw new Error("Could not locate a header row containing both a redemption-date and a clean-price column. The DMO export format may have changed.");
-  }
-  const header = rows[hdrIdx];
-  const dataRows = rows.slice(hdrIdx + 1);
-
-  const colDate   = pickColumn(header, DATE_HDRS);
-  const colPrice  = pickColumn(header, PRICE_HDRS);
-  const colCoupon = pickColumn(header, COUPON_HDRS);
-  const colName   = pickColumn(header, NAME_HDRS);
-  console.log(`Header row idx=${hdrIdx}; cols → date:${colDate} price:${colPrice} coupon:${colCoupon} name:${colName}`);
-  if (colDate === -1 || colPrice === -1) {
-    throw new Error("Required columns not found in DMO header.");
-  }
-
-  // Build (coupon, mat) → sym lookup.
-  const lookup = new Map();
-  for (const g of GILTS) lookup.set(`${g.c.toFixed(4)}|${g.mat}`, g.sym);
-
+  console.log(`Fetching ${GILTS.length} gilts from Yahoo Finance (LSE)…`);
   const prices = {};
-  const matched = new Set();
-  let scanned = 0;
-  let datedRows = 0;
+  const errors = [];
 
-  for (const r of dataRows) {
-    scanned++;
-    const matIso = parseDate(r[colDate]);
-    if (!matIso) continue;
-    datedRows++;
-
-    let coupon = colCoupon !== -1 ? parseCoupon(r[colCoupon]) : NaN;
-    // Some DMO exports put coupon inside the name column instead.
-    if ((!Number.isFinite(coupon)) && colName !== -1) {
-      const nm = String(r[colName] ?? "");
-      const m = nm.match(/(\d+(?:\.\d+)?)(?:\s+(\d+)\/(\d+))?\s*%/);
-      if (m) coupon = parseFloat(m[1]) + (m[2] ? parseInt(m[2], 10) / parseInt(m[3], 10) : 0);
+  for (let i = 0; i < GILTS.length; i++) {
+    const g = GILTS[i];
+    const r = await fetchYahoo(g.sym);
+    if (r.error) {
+      errors.push(`${g.sym}: ${r.error}`);
+    } else {
+      prices[r.sym] = r.price;
     }
-    if (!Number.isFinite(coupon)) continue;
-
-    const key = `${coupon.toFixed(4)}|${matIso}`;
-    const sym = lookup.get(key);
-    if (!sym) continue;
-
-    const px = parseNumber(r[colPrice]);
-    if (!Number.isFinite(px) || px <= 0 || px > 250) continue;
-
-    prices[sym] = +px.toFixed(4);
-    matched.add(sym);
+    if (i < GILTS.length - 1) await sleep(REQUEST_DELAY_MS);
   }
 
-  console.log(`Rows scanned: ${scanned}; rows with parseable dates: ${datedRows}; matched gilts: ${matched.size}/${GILTS.length}`);
-
-  if (matched.size === 0) {
-    throw new Error("No gilts matched. Aborting so the previous gilt-prices.json is preserved.");
-  }
-  const expected = GILTS.length;
-  const ratio = matched.size / expected;
-  if (ratio < 0.5) {
-    // Soft check: still write the file but log loudly. Better to update some
-    // than nothing.
-    console.warn(`Only ${matched.size}/${expected} gilts matched (${(ratio * 100).toFixed(1)}%). Investigate.`);
+  const matched = Object.keys(prices).length;
+  console.log(`Matched ${matched}/${GILTS.length} gilts.`);
+  if (errors.length) {
+    console.warn(`${errors.length} errors (showing first 15):`);
+    for (const e of errors.slice(0, 15)) console.warn(`  ${e}`);
   }
 
-  const missing = GILTS.filter(g => !matched.has(g.sym)).map(g => g.sym);
-  if (missing.length) console.warn(`Missing: ${missing.join(", ")}`);
+  if (matched < MIN_MATCHES) {
+    throw new Error(
+      `Only ${matched} gilts matched (need at least ${MIN_MATCHES}). ` +
+      `Aborting so the previous gilt-prices.json is preserved.`
+    );
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   const out = {
     asOf: today,
-    source: "UK DMO Daily Reference Prices (D1A)",
-    sourceUrl: DMO_URL,
+    source: "Yahoo Finance (LSE close)",
+    sourceUrl: "https://finance.yahoo.com",
     fetched: new Date().toISOString(),
-    count: matched.size,
+    count: matched,
     prices,
   };
 
@@ -311,7 +197,7 @@ async function main() {
   const outAbs = resolve(here, "..", OUT_PATH);
   mkdirSync(dirname(outAbs), { recursive: true });
   writeFileSync(outAbs, JSON.stringify(out, null, 2) + "\n");
-  console.log(`Wrote ${outAbs} (${matched.size} prices, asOf ${today})`);
+  console.log(`Wrote ${outAbs} (${matched} prices, asOf ${today})`);
 }
 
 main().catch(err => {
@@ -320,12 +206,13 @@ main().catch(err => {
 });
 
 // ── Notes for switching data source ───────────────────────────────────────
-// If the DMO export breaks long-term, swap fetch + parser with one of:
-//   1. Yahoo Finance (`query2.finance.yahoo.com/v7/finance/quote?symbols=TG46.L,...`)
-//      — unofficial; symbols use `.L` suffix not `:LSE`; rate-limited but free.
-//   2. Bank of England yield curve XLS — requires interpolation, not direct
-//      clean prices. Lower fidelity for individual gilts.
-//   3. Tradeweb FTSE Gilt Closing Prices PDFs — fragile parsing, only as
-//      a last resort.
+// If Yahoo starts requiring auth (cookie + crumb) or blocks the runner:
+//   1. UK DMO Daily Reference Prices — a CSV/Excel export linked from
+//      https://www.dmo.gov.uk/data/. The download URL is not stable and
+//      is generated by JS on the page; inspect via DevTools Network tab.
+//   2. Bank of England yield curve XLS — requires interpolation, not
+//      direct clean prices. Lower fidelity for individual gilts.
+//   3. Tradeweb FTSE Gilt Closing Prices PDFs — fragile parsing; last
+//      resort.
 // In all cases the output JSON shape stays the same so the React side
 // doesn't change.
