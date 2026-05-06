@@ -3,16 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 // ── Constants ────────────────────────────────────────────────────────────────
 const NOW = new Date();
 
-// Path to the daily-refreshed price file. The file is rebuilt by
-// .github/workflows/refresh-gilt-prices.yml from the UK DMO CSV and
-// committed to the repo. The site fetches it from the same origin.
-//
-// To override (e.g. fetch from the raw GitHub URL of a different repo)
-// set window.__GILT_PRICES_URL__ before this component mounts.
 const PRICES_URL_DEFAULT = "/gilt-prices.json";
-
-// Days of staleness before the UI shows a warning. Weekend + 1 day grace
-// period covers a typical Monday-morning load against Friday's data.
 const STALE_DAYS_WARN = 4;
 
 const MASTER = [
@@ -88,29 +79,141 @@ const MASTER = [
 ];
 
 // ── Maths ─────────────────────────────────────────────────────────────────────
-function calcAI(coupon, matStr) {
+
+/**
+ * Build the ordered list of all future coupon dates for a gilt.
+ * Walks backwards from maturity in 6-month steps until we pass TODAY,
+ * then returns the array in chronological order.
+ */
+function futureCouponDates(matStr) {
   const mat = new Date(matStr);
-  const mo = mat.getMonth(), dy = mat.getDate(), yr = NOW.getFullYear();
-  const cands = [
-    new Date(yr, mo, dy), new Date(yr, mo - 6, dy),
-    new Date(yr - 1, mo, dy), new Date(yr - 1, mo - 6, dy),
-  ].filter(d => d <= NOW);
-  const last = cands.reduce((a, b) => (b > a ? b : a));
-  const days = (NOW - last) / 86400000;
-  return (coupon / 2) * (days / 182.5);
+  const dates = [];
+  let d = new Date(mat);
+  while (d > NOW) {
+    dates.unshift(new Date(d));
+    d.setMonth(d.getMonth() - 6);
+  }
+  return dates; // chronological, all strictly after NOW
 }
 
+/**
+ * Accrued interest — Actual/Actual day count (UK gilt convention).
+ * Replaces the old fixed-182.5-day denominator.
+ */
+function calcAI(coupon, matStr) {
+  const mat = new Date(matStr);
+  const mo = mat.getMonth();
+  const dy = mat.getDate();
+  const yr = NOW.getFullYear();
+
+  // Candidate last-coupon dates
+  const cands = [
+    new Date(yr,     mo,     dy),
+    new Date(yr,     mo - 6, dy),
+    new Date(yr - 1, mo,     dy),
+    new Date(yr - 1, mo - 6, dy),
+  ].filter(d => d <= NOW);
+
+  const prevCoupon = cands.reduce((a, b) => (b > a ? b : a));
+
+  // Next coupon = prevCoupon + 6 months
+  const nextCoupon = new Date(prevCoupon);
+  nextCoupon.setMonth(nextCoupon.getMonth() + 6);
+
+  // Actual/Actual: days elapsed / actual days in period
+  const daysElapsed  = (NOW - prevCoupon)  / 86400000;
+  const periodLength = (nextCoupon - prevCoupon) / 86400000;
+
+  return (coupon / 2) * (daysElapsed / periodLength);
+}
+
+/**
+ * Solve after-tax (or gross, when taxRate=0) YTM using exact coupon schedule.
+ *
+ * Fixes vs old version:
+ *  1. Uses real future coupon dates — no more rounding error on coupon count.
+ *  2. Each cash flow discounted by its actual fractional year — correct stub period.
+ *  3. First coupon: only the portion accruing AFTER purchase is taxable income;
+ *     the accrued interest paid is a return of capital and is not taxed.
+ *  4. Redemption gain (£100 - cleanPx) is CGT-exempt — unchanged, still correct.
+ *
+ * Returns annualised yield as a percentage (e.g. 4.16 for 4.16%), or null if
+ * maturity has passed or too close.
+ */
 function solveYTM(coupon, matStr, cleanPx, ai, taxRate) {
   const mat = new Date(matStr);
-  const dp = cleanPx + ai;
-  const yrs = (mat - NOW) / (365.25 * 86400000);
-  if (yrs < 0.05) return null;
-  const n = Math.max(1, Math.round(yrs * 2));
-  const sc = (coupon / 2) * (1 - taxRate);
-  const pv = r => { const d = r / 2; let t = 0; for (let i = 1; i <= n; i++) t += sc / (1 + d) ** i; return t + 100 / (1 + d) ** n; };
-  let lo = 0.0001, hi = 0.30;
-  for (let i = 0; i < 80; i++) { const m = (lo + hi) / 2; pv(m) > dp ? (lo = m) : (hi = m); }
-  return ((lo + hi) / 2) * 100;
+  if (mat <= NOW) return null;
+
+  const dates = futureCouponDates(matStr);
+  if (dates.length === 0) return null;
+
+  const dp = cleanPx + ai; // dirty price — what you actually pay
+  const semiCoupon = coupon / 2; // gross semi-annual coupon per £100 nominal
+
+  // Build after-tax cash flows with exact timing
+  const cashFlows = dates.map((dt, i) => {
+    const isFirst = i === 0;
+    const isLast  = i === dates.length - 1;
+
+    // First coupon: the accrued interest portion (aiPaid) is a return of capital
+    // (you paid it in the dirty price), so only (semiCoupon - ai) is new income.
+    // Subsequent coupons: fully taxable income.
+    const newIncome = isFirst ? Math.max(0, semiCoupon - ai) : semiCoupon;
+    const returnOfCapital = isFirst ? Math.min(ai, semiCoupon) : 0;
+
+    const afterTaxCouponCF = newIncome * (1 - taxRate) + returnOfCapital;
+
+    // Redemption at par on final date — CGT-exempt, no tax applied
+    const redemption = isLast ? 100 : 0;
+
+    return {
+      t: (dt - NOW) / (365.25 * 86400000), // fractional years
+      cf: afterTaxCouponCF + redemption,
+    };
+  });
+
+  // PV function using semi-annual compounding (UK gilt convention):
+  // PV = Σ CF_i / (1 + r/2)^(2·t_i)
+  const pv = r => cashFlows.reduce((sum, { t, cf }) =>
+    sum + cf / Math.pow(1 + r / 2, 2 * t), 0);
+
+  // Bisection — solve for r such that PV(r) = dirty price
+  let lo = 0.0001, hi = 0.50;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    pv(mid) > dp ? (lo = mid) : (hi = mid);
+  }
+
+  return ((lo + hi) / 2) * 100; // annualised %, e.g. 4.16
+}
+
+/**
+ * Gross equivalent yield: the yield a fully-taxable instrument (e.g. a savings
+ * account or corporate bond) would need to offer to match this gilt's after-tax
+ * return.
+ *
+ * For gilts, only the coupon is taxable — the redemption gain is CGT-exempt.
+ * The old formula (atYTM / (1 - taxRate)) treated the ENTIRE return as taxable
+ * income, which badly overstates GEY for low-coupon, sub-par gilts.
+ *
+ * Correct approach: decompose the after-tax YTM into its taxable-income
+ * component and its tax-free capital component, then gross up only the former.
+ *
+ *   grossRunningYield  = coupon / cleanPx          (income component, gross)
+ *   netRunningYield    = grossRunningYield * (1 - t)
+ *   capitalComponent   = atYTM - netRunningYield   (tax-free, no gross-up needed)
+ *   GEY                = grossRunningYield + capitalComponent
+ *                      = atYTM + grossRunningYield * taxRate
+ *
+ * This is equivalent to: what gross yield on a fully-taxable bond, with the same
+ * income/capital split, matches the after-tax return?
+ */
+function calcGEY(coupon, cleanPx, atYTM, taxRate) {
+  if (taxRate === 0) return atYTM;
+  const grossRunning = (coupon / cleanPx) * 100; // % e.g. 0.13
+  // GEY = after-tax YTM + the tax that would have been paid on coupon income
+  // relative to a fully-taxable instrument
+  return atYTM + grossRunning * taxRate;
 }
 
 function getTenor(matStr) {
@@ -122,13 +225,29 @@ function processGilts(liveOverrides, isLive, taxRate) {
   return MASTER.map(g => {
     const cp = liveOverrides[g.sym] ?? g.px;
     const ai = isLive ? calcAI(g.c, g.mat) : g.ai;
-    const grossYTM = isLive ? (solveYTM(g.c, g.mat, cp, ai, 0) ?? g.gy) : g.gy;
-    const at = taxRate === 0 ? grossYTM : solveYTM(g.c, g.mat, cp, ai, taxRate);
+
+    // Gross YTM: solveYTM with taxRate=0 when live prices available,
+    // else use the snapshot value from MASTER (already correct for that date).
+    const grossYTM = isLive
+      ? (solveYTM(g.c, g.mat, cp, ai, 0) ?? g.gy)
+      : g.gy;
+
+    const at = taxRate === 0
+      ? grossYTM
+      : solveYTM(g.c, g.mat, cp, ai, taxRate);
+
     if (!at) return null;
-    const gey = taxRate === 0 ? at : at / (1 - taxRate);
-    const drag = taxRate === 0 ? 0 : grossYTM - at;
-    const yrs = (new Date(g.mat) - NOW) / (365.25 * 86400000);
-    return { ...g, cp, ai, grossYTM, at, gey, drag, yrs, tenor: getTenor(g.mat), couponType: g.c <= 2 ? "low" : "high", dPx: cp - g.px };
+
+    const gey  = calcGEY(g.c, cp, at, taxRate);
+    const drag = grossYTM - at;
+    const yrs  = (new Date(g.mat) - NOW) / (365.25 * 86400000);
+
+    return {
+      ...g, cp, ai, grossYTM, at, gey, drag, yrs,
+      tenor: getTenor(g.mat),
+      couponType: g.c <= 2 ? "low" : "high",
+      dPx: cp - g.px,
+    };
   }).filter(Boolean);
 }
 
@@ -136,13 +255,18 @@ function applyFilters(data, { matFilter, couponFilter, sortBy }) {
   let d = [...data];
   if (matFilter !== "all") d = d.filter(g => g.tenor === matFilter);
   if (couponFilter !== "all") d = d.filter(g => g.couponType === couponFilter);
-  const sorts = { atYTM: (a, b) => b.at - a.at, grossYTM: (a, b) => b.grossYTM - a.grossYTM, taxDrag: (a, b) => a.drag - b.drag, maturity: (a, b) => new Date(a.mat) - new Date(b.mat), cleanPx: (a, b) => a.cp - b.cp };
+  const sorts = {
+    atYTM:    (a, b) => b.at - a.at,
+    grossYTM: (a, b) => b.grossYTM - a.grossYTM,
+    taxDrag:  (a, b) => a.drag - b.drag,
+    maturity: (a, b) => new Date(a.mat) - new Date(b.mat),
+    cleanPx:  (a, b) => a.cp - b.cp,
+  };
   return d.sort(sorts[sortBy] ?? sorts.atYTM);
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 const s = {
-  // Layout
   wrap: { display: "flex", flexDirection: "column", minHeight: "100vh", background: "#f7f6f3", fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: "#1a1916" },
   header: { background: "#fff", borderBottom: "1px solid #e0deda", padding: "0 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 3px rgba(0,0,0,.06)" },
   logoWrap: { display: "flex", alignItems: "center", gap: 10 },
@@ -155,42 +279,38 @@ const s = {
   layout: { display: "grid", gridTemplateColumns: "256px 1fr", flex: 1 },
   sidebar: { background: "#fff", borderRight: "1px solid #e0deda", padding: "1.2rem", display: "flex", flexDirection: "column", gap: "1.1rem", overflowY: "auto" },
   main: { padding: "1.4rem", display: "flex", flexDirection: "column", gap: "1.1rem", overflowY: "auto" },
-  // Sidebar elements
   secLbl: { fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9a978f", marginBottom: 6 },
   fieldRow: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#5a5750", marginBottom: 4 },
   fieldVal: { fontFamily: "DM Mono, monospace", fontSize: 12, fontWeight: 500, color: "#1a6b4a" },
   selectEl: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, color: "#1a1916", fontFamily: "'DM Sans', sans-serif", fontSize: 13, padding: "7px 10px", width: "100%", outline: "none" },
   hr: { border: "none", borderTop: "1px solid #e0deda", margin: "0.1rem 0" },
   sbFoot: { marginTop: "auto", paddingTop: "0.9rem", borderTop: "1px solid #e0deda", fontSize: 11, color: "#9a978f", lineHeight: 1.8 },
-  // Buttons
-  btnBase: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "7px 13px", borderRadius: 6, fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1px solid #e0deda", background: "#fff", color: "#5a5750", transition: "all .12s", whiteSpace: "nowrap" },
   btnRefresh: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "7px 13px", borderRadius: 6, fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1px solid #e0deda", background: "#fff", color: "#5a5750", whiteSpace: "nowrap" },
-  // Cards
   cards: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem" },
   card: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, padding: "0.9rem 1rem", boxShadow: "0 1px 3px rgba(0,0,0,.06)" },
   cardLbl: { fontSize: 11, color: "#9a978f", marginBottom: 3 },
   cardVal: { fontSize: 22, fontWeight: 300, letterSpacing: "-0.02em", lineHeight: 1 },
   cardSub: { fontSize: 11, color: "#9a978f", marginTop: 2 },
-  // Panel
   panel: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, boxShadow: "0 1px 3px rgba(0,0,0,.06)", overflow: "hidden" },
   panelHdr: { padding: "0.65rem 1rem", borderBottom: "1px solid #e0deda", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f2f1ee" },
   panelTtl: { fontSize: 12, fontWeight: 500, color: "#5a5750" },
   pills: { display: "flex", gap: 4 },
   pill: { fontSize: 11, padding: "3px 9px", borderRadius: 20, border: "1px solid #e0deda", color: "#9a978f", background: "#fff", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" },
   pillOn: { fontSize: 11, padding: "3px 9px", borderRadius: 20, border: "1px solid rgba(26,107,74,.18)", color: "#1a6b4a", background: "#e8f5ef", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 },
-  // Table
   tblWrap: { overflowX: "auto" },
-  th: { background: "#f2f1ee", padding: "7px 11px", fontSize: 11, fontWeight: 500, letterSpacing: "0.04em", color: "#9a978f", textAlign: "left", borderBottom: "1px solid #e0deda", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" },
+  th: { background: "#f2f1ee", padding: "7px 11px", fontSize: 11, fontWeight: 500, letterSpacing: "0.04em", color: "#9a978f", textAlign: "left", borderBottom: "1px solid #e0deda", whiteSpace: "nowrap" },
   thR: { background: "#f2f1ee", padding: "7px 11px", fontSize: 11, fontWeight: 500, letterSpacing: "0.04em", color: "#9a978f", textAlign: "right", borderBottom: "1px solid #e0deda", whiteSpace: "nowrap" },
   tdBase: { padding: "7px 11px", whiteSpace: "nowrap", verticalAlign: "middle", fontSize: 13, borderBottom: "1px solid #e0deda" },
   tdR: { padding: "7px 11px", whiteSpace: "nowrap", verticalAlign: "middle", fontSize: 13, textAlign: "right", borderBottom: "1px solid #e0deda" },
   ts: { display: "flex", justifyContent: "space-between", padding: "5px 11px", background: "#f2f1ee", borderTop: "1px solid #e0deda", fontSize: 11, color: "#9a978f" },
-  // Notice
   noticeInfo: { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#e8f0fb", color: "#2563a8", border: "1px solid rgba(37,99,168,.18)" },
   noticeWarn: { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#fef3e2", color: "#92600a", border: "1px solid rgba(146,96,10,.2)" },
   noticeOk:   { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#e8f5ef", color: "#1a6b4a", border: "1px solid rgba(26,107,74,.18)" },
+  // Methodology tooltip
+  methodBox: { background: "#f2f1ee", border: "1px solid #e0deda", borderRadius: 6, padding: "0.9rem 1rem", fontSize: 12, color: "#5a5750", lineHeight: 1.75 },
 };
 
+// ── Sub-components ────────────────────────────────────────────────────────────
 function LiveDot() {
   return <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1a6b4a", display: "inline-block", animation: "blink 2s ease-in-out infinite" }} />;
 }
@@ -246,8 +366,26 @@ function GiltTable({ data, isLive }) {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              {["#", "Gilt", "Coupon", "Maturity", "Tenor", "Clean £", "Δ Price", "Gross YTM", "After-Tax YTM", "Gross Equiv. Yield", "Tax Drag", "Type", "Relative"].map((h, i) => (
-                <th key={h} style={i <= 1 ? s.th : s.thR}>{h}</th>
+              {[
+                ["#",                false],
+                ["Gilt",             false],
+                ["Coupon",           true],
+                ["Maturity",         true],
+                ["Tenor",            true],
+                ["Clean £",          true],
+                ["Δ Price",          true],
+                ["Gross YTM",        true],
+                ["After-Tax YTM",    true],
+                ["Deposit Equiv. ▲", true], // renamed + tooltip
+                ["Tax Drag",         true],
+                ["Type",             true],
+                ["Relative",         true],
+              ].map(([h, right]) => (
+                <th key={h} style={right ? s.thR : s.th} title={
+                  h === "Deposit Equiv. ▲"
+                    ? "Gross yield a fully-taxable deposit/bond would need to match this gilt's after-tax return. Formula: after-tax YTM + (coupon/price) × tax rate. Accurate for low-coupon gilts; slightly understates for high-coupon gilts."
+                    : undefined
+                }>{h}</th>
               ))}
             </tr>
           </thead>
@@ -294,9 +432,44 @@ function GiltTable({ data, isLive }) {
         </table>
       </div>
       <div style={s.ts}>
-        <span>{isLive ? "⬤ Live · UK DMO daily reference prices" : "◯ Cached · giltsyield.com 31 Mar 2026"}</span>
+        <span>{isLive ? "⬤ Live · UK DMO daily reference prices" : "◯ Cached · snapshot 31 Mar 2026"}</span>
         <span>{now}</span>
       </div>
+    </div>
+  );
+}
+
+// ── Methodology note ──────────────────────────────────────────────────────────
+function MethodologyNote({ taxRate }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ ...s.btnRefresh, fontSize: 11, padding: "5px 11px", color: "#9a978f" }}
+      >
+        {open ? "▲" : "▼"} Methodology
+      </button>
+      {open && (
+        <div style={{ ...s.methodBox, marginTop: 8 }}>
+          <strong style={{ color: "#1a1916" }}>After-tax YTM</strong> — solved by bisection on the IRR of
+          after-tax cash flows using the exact future coupon schedule (not rounded period count).
+          Each cash flow is discounted by its actual fractional year (Actual/365.25).
+          Coupon income is taxed at {Math.round(taxRate * 100)}%; the redemption gain (£100 − clean price) is
+          CGT-exempt under TCGA 1992 s.115. On the first coupon, only the portion
+          accruing <em>after</em> purchase is treated as taxable income — the accrued interest
+          paid at purchase is a return of capital.
+          <br /><br />
+          <strong style={{ color: "#1a1916" }}>Accrued interest</strong> — Actual/Actual day count
+          (days elapsed ÷ actual days in coupon period), per UK gilt convention.
+          <br /><br />
+          <strong style={{ color: "#1a1916" }}>Deposit Equiv.</strong> — the gross yield a fully-taxable
+          deposit or bond would need to match this gilt's after-tax return.
+          Formula: <code>after-tax YTM + (coupon / clean price) × tax rate</code>.
+          This correctly grosses up only the taxable coupon component; the
+          tax-free capital gain needs no gross-up.
+        </div>
+      )}
     </div>
   );
 }
@@ -328,7 +501,6 @@ export default function GiltTerminal() {
         throw new Error("Malformed price file");
       }
 
-      // Accept either { sym: number } or { sym: { px: number } } shape.
       const overrides = {};
       let n = 0;
       for (const [sym, val] of Object.entries(j.prices)) {
@@ -348,7 +520,6 @@ export default function GiltTerminal() {
       setAsOf(j.asOf || null);
       setUpdateStamp(j.asOf ? `Prices · ${j.asOf}` : `Prices · ${n} loaded`);
 
-      // Staleness check (calendar days; weekend tolerated by STALE_DAYS_WARN).
       const ageDays = j.asOf
         ? Math.floor((Date.now() - new Date(j.asOf + "T00:00:00Z").getTime()) / 86400000)
         : null;
@@ -365,7 +536,6 @@ export default function GiltTerminal() {
         setTimeout(() => setNotice(null), 5000);
       }
     } catch (err) {
-      // Fall back to the in-file snapshot.
       setLiveOverrides({});
       setIsLive(false);
       setAsOf(null);
@@ -378,9 +548,6 @@ export default function GiltTerminal() {
     setRefreshing(false);
   }, []);
 
-  // Fetch once on mount. The price file is rebuilt server-side once per
-  // weekday by the GitHub Actions workflow — no need to re-poll within a
-  // session.
   useEffect(() => { refresh(); }, [refresh]);
 
   const TENOR_PILLS = [
@@ -399,6 +566,7 @@ export default function GiltTerminal() {
         select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239a978f'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px !important; }
         tr:last-child td { border-bottom: none !important; }
         tr:hover td { background: #f2f1ee !important; }
+        th[title] { cursor: help; border-bottom: 1px dashed #c0bdb7 !important; }
       `}</style>
 
       <div style={s.wrap}>
@@ -464,9 +632,10 @@ export default function GiltTerminal() {
             <div style={{ fontSize: 12, color: "#5a5750", lineHeight: 1.75 }}>
               <div style={s.secLbl}>Data source</div>
               <strong style={{ color: "#1a1916" }}>Live:</strong> UK DMO daily reference prices<br />
-              <strong style={{ color: "#1a1916" }}>Fallback:</strong> giltsyield.com snapshot 31 Mar 2026<br />
+              <strong style={{ color: "#1a1916" }}>Fallback:</strong> snapshot 31 Mar 2026<br />
               <span style={{ color: "#9a978f", fontSize: 11 }}>
-                Refreshed each weekday after the LSE close by a GitHub Action. Accrued interest calculated locally. 0% CGT on redemption gain.
+                Refreshed each weekday after LSE close by GitHub Action.
+                AI uses Actual/Actual day count. YTM uses exact coupon schedule.
                 {asOf && <> Last refresh: <strong style={{ color: "#1a1916" }}>{asOf}</strong>.</>}
               </span>
             </div>
@@ -502,6 +671,8 @@ export default function GiltTerminal() {
                 : <div style={{ padding: "3rem 2rem", textAlign: "center", color: "#9a978f" }}>No gilts match the current filters.</div>
               }
             </div>
+
+            <MethodologyNote taxRate={taxRate} />
           </main>
         </div>
       </div>
