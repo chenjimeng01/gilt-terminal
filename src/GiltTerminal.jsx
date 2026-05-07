@@ -188,32 +188,14 @@ function solveYTM(coupon, matStr, cleanPx, ai, taxRate) {
 }
 
 /**
- * Gross equivalent yield: the yield a fully-taxable instrument (e.g. a savings
- * account or corporate bond) would need to offer to match this gilt's after-tax
- * return.
+ * Deposit-equivalent yield: the gross yield a fully-taxable instrument would
+ * need to offer to match this gilt's after-tax return.
  *
- * For gilts, only the coupon is taxable — the redemption gain is CGT-exempt.
- * The old formula (atYTM / (1 - taxRate)) treated the ENTIRE return as taxable
- * income, which badly overstates GEY for low-coupon, sub-par gilts.
- *
- * Correct approach: decompose the after-tax YTM into its taxable-income
- * component and its tax-free capital component, then gross up only the former.
- *
- *   grossRunningYield  = coupon / cleanPx          (income component, gross)
- *   netRunningYield    = grossRunningYield * (1 - t)
- *   capitalComponent   = atYTM - netRunningYield   (tax-free, no gross-up needed)
- *   GEY                = grossRunningYield + capitalComponent
- *                      = atYTM + grossRunningYield * taxRate
- *
- * This is equivalent to: what gross yield on a fully-taxable bond, with the same
- * income/capital split, matches the after-tax return?
+ * Formula: atYTM / (1 - taxRate)
  */
 function calcGEY(coupon, cleanPx, atYTM, taxRate) {
   if (taxRate === 0) return atYTM;
-  const grossRunning = (coupon / cleanPx) * 100; // % e.g. 0.13
-  // GEY = after-tax YTM + the tax that would have been paid on coupon income
-  // relative to a fully-taxable instrument
-  return atYTM + grossRunning * taxRate;
+  return atYTM / (1 - taxRate);
 }
 
 function getTenor(matStr) {
