@@ -2,7 +2,7 @@
   "asOf": "2026-05-22",
   "source": "UK DMO Daily Reference Prices (D10B, clean mid)",
   "sourceUrl": "https://www.dmo.gov.uk/umbraco/surface/DataExport/GetDataExport?reportCode=D10B&exportFormatValue=xls&parameters=%26Trade%20Date%3D22%2F05%2F2026",
-  "fetched": "2026-05-22T19:54:13.012Z",
+  "fetched": "2026-05-25T19:48:20.046Z",
   "count": 69,
   "prices": {
     "TN34": 96.26,
