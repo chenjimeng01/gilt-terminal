@@ -1,4 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { calcAI, solveYTM } from "./giltMath.js";
+import { MASTER } from "./giltUniverse.js";
+import LadderView from "./LadderView.jsx";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const NOW = new Date();
@@ -6,186 +9,9 @@ const NOW = new Date();
 const PRICES_URL_DEFAULT = "/gilt-prices.json";
 const STALE_DAYS_WARN = 4;
 
-const MASTER = [
-  {name:"4¼% Treasury Gilt 2034",   c:4.25,  mat:"2034-07-31",px:96.53, ai:0.704,gy:4.816,sym:"TN34"},
-  {name:"4 3/8% Treasury Gilt 2040",c:4.375, mat:"2040-01-31",px:91.97, ai:0.725,gy:5.263,sym:"TG40"},
-  {name:"1½% Treasury Gilt 2047",   c:1.5,   mat:"2047-07-22",px:50.49, ai:0.286,gy:5.534,sym:"TG47"},
-  {name:"0 7/8% Treasury Gilt 2046",c:0.875, mat:"2046-01-31",px:45.04, ai:0.145,gy:5.511,sym:"TG46"},
-  {name:"3¼% Treasury Gilt 2044",   c:3.25,  mat:"2044-01-22",px:75.57, ai:0.619,gy:5.475,sym:"TG44"},
-  {name:"1¼% Treasury Gilt 2041",   c:1.25,  mat:"2041-10-22",px:57.88, ai:0.553,gy:5.312,sym:"TG41"},
-  {name:"1¾% Treasury Gilt 2049",   c:1.75,  mat:"2049-01-22",px:51.92, ai:0.334,gy:5.536,sym:"TG49"},
-  {name:"4 1/8% Treasury Gilt 2029",c:4.125, mat:"2029-07-22",px:99.24, ai:0.786,gy:4.419,sym:"TS29"},
-  {name:"4½% Treasury Gilt 2028",   c:4.5,   mat:"2028-06-07",px:100.28,ai:1.422,gy:4.408,sym:"TS28"},
-  {name:"3¾% Treasury Gilt 2027",   c:3.75,  mat:"2027-03-07",px:99.47, ai:0.255,gy:4.373,sym:"TS27"},
-  {name:"1¾% Treasury Gilt 2037",   c:1.75,  mat:"2037-09-07",px:72.01, ai:0.119,gy:5.053,sym:"TG37"},
-  {name:"0 5/8% Treasury Gilt 2035",c:0.625, mat:"2035-07-31",px:68.83, ai:0.104,gy:4.869,sym:"TG35"},
-  {name:"4 1/8% Treasury Gilt 2033",c:4.125, mat:"2033-03-07",px:97.10, ai:0.280,gy:4.671,sym:"T33H"},
-  {name:"0 7/8% Green Gilt 2033",   c:0.875, mat:"2033-07-31",px:76.82, ai:0.145,gy:4.693,sym:"TG33"},
-  {name:"1% Treasury Gilt 2032",    c:1.0,   mat:"2032-01-31",px:82.20, ai:0.166,gy:4.549,sym:"TG32"},
-  {name:"0¼% Treasury Gilt 2031",   c:0.25,  mat:"2031-07-31",px:80.62, ai:0.041,gy:4.412,sym:"TG31"},
-  {name:"4% Treasury Gilt 2029",    c:4.0,   mat:"2029-05-22",px:98.85, ai:1.915,gy:4.442,sym:"T29K"},
-  {name:"0 3/8% Treasury Gilt 2030",c:0.375, mat:"2030-10-22",px:83.90, ai:0.166,gy:4.348,sym:"TG30"},
-  {name:"3¾% Treasury Gilt 2038",   c:3.75,  mat:"2038-01-29",px:88.35, ai:0.642,gy:5.135,sym:"TG38"},
-  {name:"1 1/8% Treasury Gilt 2039",c:1.125, mat:"2039-01-31",px:62.98, ai:0.186,gy:5.153,sym:"TR39"},
-  {name:"4¾% Treasury Stock 2038",  c:4.75,  mat:"2038-12-07",px:96.79, ai:1.501,gy:5.160,sym:"TR38"},
-  {name:"4¾% Treasury Gilt 2035",   c:4.75,  mat:"2035-10-22",px:99.01, ai:2.737,gy:4.939,sym:"T35V"},
-  {name:"0½% Treasury Gilt 2061",   c:0.5,   mat:"2061-10-22",px:24.03, ai:0.221,gy:5.290,sym:"TG61"},
-  {name:"4 3/8% Treasury Gilt 2028",c:4.375, mat:"2028-03-07",px:99.96, ai:0.297,gy:4.441,sym:"TE28"},
-  {name:"2½% Treasury Gilt 2065",   c:2.5,   mat:"2065-07-22",px:52.91, ai:0.477,gy:5.472,sym:"TG65"},
-  {name:"4¾% Treasury Gilt 2043",   c:4.75,  mat:"2043-10-22",px:92.79, ai:2.101,gy:5.462,sym:"TR43"},
-  {name:"0 7/8% Treasury Gilt 2029",c:0.875, mat:"2029-10-22",px:88.92, ai:0.387,gy:4.308,sym:"TR29"},
-  {name:"6% Treasury Stock 2028",   c:6.0,   mat:"2028-12-07",px:104.29,ai:1.896,gy:4.331,sym:"TR28"},
-  {name:"4¼% Treasury Gilt 2027",   c:4.25,  mat:"2027-12-07",px:99.89, ai:1.343,gy:4.362,sym:"TR27"},
-  {name:"0 1/8% Treasury Gilt 2028",c:0.125, mat:"2028-01-31",px:92.91, ai:0.021,gy:4.224,sym:"TN28"},
-  {name:"0 5/8% Treasury Gilt 2050",c:0.625, mat:"2050-10-22",px:35.14, ai:0.276,gy:5.518,sym:"TG50"},
-  {name:"1¾% Treasury Gilt 2057",   c:1.75,  mat:"2057-07-22",px:44.60, ai:0.334,gy:5.538,sym:"TG57"},
-  {name:"1½% Green Gilt 2053",      c:1.5,   mat:"2053-07-31",px:43.73, ai:0.249,gy:5.582,sym:"TG53"},
-  {name:"1¼% Treasury Gilt 2051",   c:1.25,  mat:"2051-07-31",px:42.25, ai:0.207,gy:5.579,sym:"T51A"},
-  {name:"4½% Treasury Gilt 2034",   c:4.5,   mat:"2034-09-07",px:98.31, ai:0.306,gy:4.799,sym:"TR34"},
-  {name:"3¼% Treasury Gilt 2033",   c:3.25,  mat:"2033-01-31",px:92.11, ai:0.539,gy:4.660,sym:"TR33"},
-  {name:"4¼% Treasury Stock 2032",  c:4.25,  mat:"2032-06-07",px:98.79, ai:1.343,gy:4.524,sym:"TR32"},
-  {name:"4¾% Treasury Gilt 2030",   c:4.75,  mat:"2030-12-07",px:101.78,ai:1.501,gy:4.366,sym:"TR30"},
-  {name:"0 3/8% Treasury Gilt 2026",c:0.375, mat:"2026-10-22",px:98.07, ai:0.166,gy:3.939,sym:"T26A"},
-  {name:"4% Treasury Gilt 2063",    c:4.0,   mat:"2063-10-22",px:76.79, ai:1.769,gy:5.534,sym:"TR63"},
-  {name:"4% Treasury Gilt 2060",    c:4.0,   mat:"2060-01-22",px:77.74, ai:0.762,gy:5.521,sym:"TR60"},
-  {name:"1 5/8% Treasury Gilt 2071",c:1.625, mat:"2071-10-22",px:38.04, ai:0.719,gy:5.248,sym:"TG71"},
-  {name:"4 3/8% Treasury Gilt 2030",c:4.375, mat:"2030-03-07",px:99.94, ai:0.297,gy:4.439,sym:"T30"},
-  {name:"4% Treasury Gilt 2031",    c:4.0,   mat:"2031-10-22",px:97.63, ai:1.769,gy:4.536,sym:"T31"},
-  {name:"5¼% Treasury Gilt 2041",   c:5.25,  mat:"2041-01-31",px:100.01,ai:0.870,gy:5.316,sym:"T41F"},
-  {name:"4 5/8% Treasury Gilt 2034",c:4.625, mat:"2034-01-31",px:99.43, ai:0.767,gy:4.767,sym:"T34"},
-  {name:"4 5/8% Green Gilt 2037",   c:4.625, mat:"2037-03-07",px:96.82, ai:0.264,gy:5.066,sym:"T37H"},
-  {name:"4½% Treasury Gilt 2035",   c:4.5,   mat:"2035-03-07",px:97.71, ai:0.306,gy:4.876,sym:"T35"},
-  {name:"1 5/8% Treasury Gilt 2054",c:1.625, mat:"2054-10-22",px:44.70, ai:0.719,gy:5.552,sym:"TR54"},
-  {name:"4¼% Treasury Gilt 2039",   c:4.25,  mat:"2039-09-07",px:91.36, ai:0.289,gy:5.214,sym:"T39"},
-  {name:"4¼% Treasury Gilt 2055",   c:4.25,  mat:"2055-12-07",px:82.05, ai:1.343,gy:5.555,sym:"TR4Q"},
-  {name:"1½% Treasury Gilt 2026",   c:1.5,   mat:"2026-07-22",px:99.29, ai:0.286,gy:3.897,sym:"TG26"},
-  {name:"4¼% Treasury Gilt 2040",   c:4.25,  mat:"2040-12-07",px:90.12, ai:1.343,gy:5.289,sym:"T40"},
-  {name:"4½% Treasury Gilt 2042",   c:4.5,   mat:"2042-12-07",px:90.93, ai:1.422,gy:5.397,sym:"T42"},
-  {name:"3½% Treasury Gilt 2045",   c:3.5,   mat:"2045-01-22",px:77.56, ai:0.667,gy:5.489,sym:"T45"},
-  {name:"4¼% Treasury Gilt 2046",   c:4.25,  mat:"2046-12-07",px:85.29, ai:1.343,gy:5.517,sym:"T46"},
-  {name:"4¼% Treasury Gilt 2049",   c:4.25,  mat:"2049-12-07",px:84.08, ai:1.343,gy:5.529,sym:"T49"},
-  {name:"0½% Treasury Gilt 2029",   c:0.5,   mat:"2029-01-31",px:90.07, ai:0.083,gy:4.298,sym:"TG29"},
-  {name:"1 5/8% Treasury Gilt 2028",c:1.625, mat:"2028-10-22",px:93.74, ai:0.719,gy:4.269,sym:"TG28"},
-  {name:"1¼% Treasury Gilt 2027",   c:1.25,  mat:"2027-07-22",px:96.12, ai:0.238,gy:4.387,sym:"TG27"},
-  {name:"3½% Treasury Gilt 2068",   c:3.5,   mat:"2068-07-22",px:68.64, ai:0.667,gy:5.461,sym:"TR68"},
-  {name:"4 1/8% Treasury Gilt 2027",c:4.125, mat:"2027-01-29",px:99.86, ai:0.706,gy:4.341,sym:"T27A"},
-  {name:"4¼% Treasury Stock 2036",  c:4.25,  mat:"2036-03-07",px:94.92, ai:0.289,gy:4.961,sym:"T4Q"},
-  {name:"3¾% Treasury Gilt 2052",   c:3.75,  mat:"2052-07-22",px:76.05, ai:0.715,gy:5.554,sym:"T52"},
-  {name:"4 1/8% Treasury Gilt 2031",c:4.125, mat:"2031-03-07",px:98.59, ai:0.280,gy:4.496,sym:"T31H"},
-  {name:"4 3/8% Treasury Gilt 2054",c:4.375, mat:"2054-07-31",px:83.86, ai:0.725,gy:5.582,sym:"T54"},
-  {name:"3¾% Treasury Gilt 2053",   c:3.75,  mat:"2053-10-22",px:75.19, ai:1.659,gy:5.586,sym:"T53"},
-  {name:"5 3/8% Treasury Gilt 2056",c:5.375, mat:"2056-01-31",px:98.44, ai:0.891,gy:5.556,sym:"T56"},
-  {name:"1 1/8% Treasury Gilt 2073",c:1.125, mat:"2073-10-22",px:29.78, ai:0.498,gy:5.078,sym:"TR73"},
-];
 
 // ── Maths ─────────────────────────────────────────────────────────────────────
 
-/**
- * Build the ordered list of all future coupon dates for a gilt.
- * Walks backwards from maturity in 6-month steps until we pass TODAY,
- * then returns the array in chronological order.
- */
-function futureCouponDates(matStr) {
-  const mat = new Date(matStr);
-  const dates = [];
-  let d = new Date(mat);
-  while (d > NOW) {
-    dates.unshift(new Date(d));
-    d.setMonth(d.getMonth() - 6);
-  }
-  return dates; // chronological, all strictly after NOW
-}
-
-/**
- * Accrued interest — Actual/Actual day count (UK gilt convention).
- * Replaces the old fixed-182.5-day denominator.
- */
-function calcAI(coupon, matStr) {
-  const mat = new Date(matStr);
-  const mo = mat.getMonth();
-  const dy = mat.getDate();
-  const yr = NOW.getFullYear();
-
-  // Candidate last-coupon dates
-  const cands = [
-    new Date(yr,     mo,     dy),
-    new Date(yr,     mo - 6, dy),
-    new Date(yr - 1, mo,     dy),
-    new Date(yr - 1, mo - 6, dy),
-  ].filter(d => d <= NOW);
-
-  const prevCoupon = cands.reduce((a, b) => (b > a ? b : a));
-
-  // Next coupon = prevCoupon + 6 months
-  const nextCoupon = new Date(prevCoupon);
-  nextCoupon.setMonth(nextCoupon.getMonth() + 6);
-
-  // Actual/Actual: days elapsed / actual days in period
-  const daysElapsed  = (NOW - prevCoupon)  / 86400000;
-  const periodLength = (nextCoupon - prevCoupon) / 86400000;
-
-  return (coupon / 2) * (daysElapsed / periodLength);
-}
-
-/**
- * Solve after-tax (or gross, when taxRate=0) YTM using exact coupon schedule.
- *
- * Fixes vs old version:
- *  1. Uses real future coupon dates — no more rounding error on coupon count.
- *  2. Each cash flow discounted by its actual fractional year — correct stub period.
- *  3. First coupon: only the portion accruing AFTER purchase is taxable income;
- *     the accrued interest paid is a return of capital and is not taxed.
- *  4. Redemption gain (£100 - cleanPx) is CGT-exempt — unchanged, still correct.
- *
- * Returns annualised yield as a percentage (e.g. 4.16 for 4.16%), or null if
- * maturity has passed or too close.
- */
-function solveYTM(coupon, matStr, cleanPx, ai, taxRate) {
-  const mat = new Date(matStr);
-  if (mat <= NOW) return null;
-
-  const dates = futureCouponDates(matStr);
-  if (dates.length === 0) return null;
-
-  const dp = cleanPx + ai; // dirty price — what you actually pay
-  const semiCoupon = coupon / 2; // gross semi-annual coupon per £100 nominal
-
-  // Build after-tax cash flows with exact timing
-  const cashFlows = dates.map((dt, i) => {
-    const isFirst = i === 0;
-    const isLast  = i === dates.length - 1;
-
-    // First coupon: the accrued interest portion (aiPaid) is a return of capital
-    // (you paid it in the dirty price), so only (semiCoupon - ai) is new income.
-    // Subsequent coupons: fully taxable income.
-    const newIncome = isFirst ? Math.max(0, semiCoupon - ai) : semiCoupon;
-    const returnOfCapital = isFirst ? Math.min(ai, semiCoupon) : 0;
-
-    const afterTaxCouponCF = newIncome * (1 - taxRate) + returnOfCapital;
-
-    // Redemption at par on final date — CGT-exempt, no tax applied
-    const redemption = isLast ? 100 : 0;
-
-    return {
-      t: (dt - NOW) / (365.25 * 86400000), // fractional years
-      cf: afterTaxCouponCF + redemption,
-    };
-  });
-
-  // PV function using semi-annual compounding (UK gilt convention):
-  // PV = Σ CF_i / (1 + r/2)^(2·t_i)
-  const pv = r => cashFlows.reduce((sum, { t, cf }) =>
-    sum + cf / Math.pow(1 + r / 2, 2 * t), 0);
-
-  // Bisection — solve for r such that PV(r) = dirty price
-  let lo = 0.0001, hi = 0.50;
-  for (let i = 0; i < 100; i++) {
-    const mid = (lo + hi) / 2;
-    pv(mid) > dp ? (lo = mid) : (hi = mid);
-  }
-
-  return ((lo + hi) / 2) * 100; // annualised %, e.g. 4.16
-}
 
 /**
  * Deposit-equivalent yield: the gross yield a fully-taxable instrument would
@@ -468,6 +294,8 @@ export default function GiltTerminal() {
   const [notice, setNotice] = useState(null);
   const [updateStamp, setUpdateStamp] = useState("Prices: snapshot 31 Mar 2026");
   const [asOf, setAsOf] = useState(null);
+  const [view, setView] = useState(() =>
+    typeof window !== "undefined" && window.location.hash.startsWith("#ladder") ? "ladder" : "analyser");
 
   const data = processGilts(liveOverrides, isLive, taxRate);
   const filtered = applyFilters(data, { matFilter, couponFilter, sortBy });
@@ -559,6 +387,15 @@ export default function GiltTerminal() {
             <span style={s.logoText}>Gilt Terminal</span>
             <span style={s.logoSub}>after-tax yield analyser</span>
           </div>
+          <div style={s.pills}>
+            {[["analyser", "Analyser"], ["ladder", "Ladder"]].map(([v, label]) => (
+              <button key={v} style={view === v ? s.pillOn : s.pill}
+                onClick={() => {
+                  setView(v);
+                  if (v === "analyser") window.history.replaceState(null, "", window.location.pathname);
+                }}>{label}</button>
+            ))}
+          </div>
           <div style={s.hdrRight}>
             <span style={s.stamp}>{updateStamp}</span>
             {isLive && <div style={s.livePill}><LiveDot />&nbsp;Live</div>}
@@ -572,6 +409,10 @@ export default function GiltTerminal() {
         </header>
 
         {/* Body */}
+        {view === "ladder" ? (
+          <LadderView taxRate={taxRate} setTaxRate={setTaxRate}
+            liveOverrides={liveOverrides} isLive={isLive} asOf={asOf} />
+        ) : (
         <div style={s.layout}>
           {/* Sidebar */}
           <aside style={s.sidebar}>
@@ -657,6 +498,7 @@ export default function GiltTerminal() {
             <MethodologyNote taxRate={taxRate} />
           </main>
         </div>
+        )}
       </div>
     </>
   );
