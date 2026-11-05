@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { calcAI, solveYTM, futureCouponDates, addMonthsUTC, settlementTerms, afterTaxCouponFlows } from "./src/giltMath.js";
+import { calcAI, solveYTM, futureCouponDates, addMonthsUTC, settlementTerms, afterTaxCouponFlows, priceSettlement } from "./src/giltMath.js";
 import { buildLadder, quickFill, priceGilt } from "./src/ladderEngine.js";
 import { MASTER } from "./src/giltUniverse.js";
 
@@ -286,4 +286,12 @@ test("solveYTM gross yield inverts the DMO price formula", () => {
       near(solveYTM(g.c, g.mat, dirty - ai, ai, 0, settle) / 100, y, 1e-8, `${s} @ ${iso(settle)} y=${y}`);
     }
   }
+});
+
+// ── P1-5: analyser settlement = next business day after the price date ──────
+test("priceSettlement: T+1 business day after asOf (or after today)", () => {
+  assert.equal(iso(priceSettlement("2026-11-04")), "2026-11-05");          // Wed → Thu
+  assert.equal(iso(priceSettlement("2026-11-06")), "2026-11-09");          // Fri → Mon
+  assert.equal(iso(priceSettlement(null, new Date("2026-11-07T22:30:00Z"))), "2026-11-09"); // Sat → Mon
+  assert.equal(iso(priceSettlement(null, new Date("2026-11-05T09:15:00Z"))), "2026-11-06");
 });

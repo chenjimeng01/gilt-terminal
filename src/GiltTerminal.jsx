@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
-import { settlementTerms, solveYTM } from "./giltMath.js";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { settlementTerms, solveYTM, priceSettlement } from "./giltMath.js";
 import { MASTER } from "./giltUniverse.js";
 import LadderView from "./LadderView.jsx";
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const NOW = new Date();
 
 const PRICES_URL_DEFAULT = "/gilt-prices.json";
 const STALE_DAYS_WARN = 4;
@@ -24,17 +23,19 @@ function calcGEY(coupon, cleanPx, atYTM, taxRate) {
   return atYTM / (1 - taxRate);
 }
 
-function getTenor(matStr) {
-  const y = (new Date(matStr) - NOW) / (365.25 * 86400000);
+function getTenor(matStr, settlement) {
+  const y = (new Date(matStr) - settlement) / (365.25 * 86400000);
   return y <= 5 ? "short" : y <= 15 ? "medium" : "long";
 }
 
-function processGilts(liveOverrides, isLive, taxRate) {
-  return MASTER.filter(g => new Date(g.mat) > NOW).map(g => {
+// `settlement`: accrued interest and yields are computed for T+1 settlement
+// after the price date (priceSettlement), not for the moment the page loaded.
+function processGilts(liveOverrides, isLive, taxRate, settlement) {
+  return MASTER.filter(g => new Date(g.mat) > settlement).map(g => {
     const cp = liveOverrides[g.sym] ?? g.px;
     // Accrued interest at settlement, negative inside the ex-dividend window
     // (the buyer forgoes the next coupon; solveYTM then excludes it).
-    const terms = settlementTerms(g.c, g.mat, NOW);
+    const terms = settlementTerms(g.c, g.mat, settlement);
     const ai = isLive ? terms.ai : g.ai;
 
     // Gross YTM: solveYTM with taxRate=0 when live prices available,
@@ -42,20 +43,20 @@ function processGilts(liveOverrides, isLive, taxRate) {
     // null = no yield in range reprices the gilt; shown as "—" with a warning,
     // never replaced by a stale or boundary value.
     const grossYTM = isLive
-      ? solveYTM(g.c, g.mat, cp, ai, 0)
+      ? solveYTM(g.c, g.mat, cp, ai, 0, settlement)
       : g.gy;
 
     const at = taxRate === 0
       ? grossYTM
-      : solveYTM(g.c, g.mat, cp, ai, taxRate);
+      : solveYTM(g.c, g.mat, cp, ai, taxRate, settlement);
 
     const gey  = at != null ? calcGEY(g.c, cp, at, taxRate) : null;
     const drag = at != null && grossYTM != null ? grossYTM - at : null;
-    const yrs  = (new Date(g.mat) - NOW) / (365.25 * 86400000);
+    const yrs  = (new Date(g.mat) - settlement) / (365.25 * 86400000);
 
     return {
       ...g, cp, ai, exDiv: terms.exDiv, grossYTM, at, gey, drag, yrs,
-      tenor: getTenor(g.mat),
+      tenor: getTenor(g.mat, settlement),
       couponType: g.c <= 2 ? "low" : "high",
       dPx: cp - g.px,
     };
@@ -269,7 +270,7 @@ function GiltTable({ data, isLive }) {
 }
 
 // ── Methodology note ──────────────────────────────────────────────────────────
-function MethodologyNote({ taxRate }) {
+function MethodologyNote({ taxRate, settlement }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -292,6 +293,10 @@ function MethodologyNote({ taxRate }) {
           only the portion of the first coupon accruing <em>after</em> purchase is taxed (relief
           for the accrued interest paid); on an ex-dividend purchase the next coupon goes to the
           seller and the buyer is taxed on the rebate interest (HMRC SAIM4150).
+          <br /><br />
+          <strong style={{ color: "#1a1916" }}>Settlement</strong> — accrued interest and yields are
+          for settlement on {settlement.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })},
+          the next business day after the price date (DMO reference prices are for T+1 settlement).
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Accrued interest</strong> — Actual/Actual day count
           (days elapsed ÷ actual days in coupon period), per UK gilt convention. Within 7 business
@@ -323,7 +328,8 @@ export default function GiltTerminal() {
   const [view, setView] = useState(() =>
     typeof window !== "undefined" && window.location.hash.startsWith("#ladder") ? "ladder" : "analyser");
 
-  const data = processGilts(liveOverrides, isLive, taxRate);
+  const settlement = useMemo(() => priceSettlement(isLive ? asOf : null), [isLive, asOf]);
+  const data = processGilts(liveOverrides, isLive, taxRate, settlement);
   const filtered = applyFilters(data, { matFilter, couponFilter, sortBy });
 
   const refresh = useCallback(async () => {
@@ -521,7 +527,7 @@ export default function GiltTerminal() {
               }
             </div>
 
-            <MethodologyNote taxRate={taxRate} />
+            <MethodologyNote taxRate={taxRate} settlement={settlement} />
           </main>
         </div>
         )}

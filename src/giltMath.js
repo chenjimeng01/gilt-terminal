@@ -104,6 +104,18 @@ export function subBusinessDays(d, n) {
   return out;
 }
 
+/**
+ * Settlement date for prices dated `asOf` ("YYYY-MM-DD"): DMO reference prices
+ * are for next-business-day settlement, so T+1 after asOf. Without an asOf
+ * (snapshot prices), T+1 after `today`'s UTC date. Returns UTC midnight.
+ */
+export function priceSettlement(asOf, today = new Date()) {
+  const base = asOf
+    ? new Date(asOf + "T00:00:00Z")
+    : new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  return addBusinessDays(base, 1);
+}
+
 // ── Settlement terms (shared by analyser and ladder) ─────────────────────────
 
 /**
