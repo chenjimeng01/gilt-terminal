@@ -54,4 +54,7 @@ diverges from the spec.
 
 ## Out of scope honoured
 
-Coupon-offset sizing, index-linked, PSA modelling, rolling ladders, multi-account — none built.
+Index-linked, PSA modelling, rolling ladders, multi-account — none built. (Coupon-offset
+sizing was added in the 2026-11 review as `sizing: "couponOffset"`; simple sizing stays the
+default.) A test asserts the universe has no index-linked gilts, so the name-based guard
+stays meaningful.

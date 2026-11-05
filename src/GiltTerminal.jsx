@@ -6,6 +6,10 @@ import LadderView from "./LadderView.jsx";
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const PRICES_URL_DEFAULT = "/gilt-prices.json";
+// Date of the fallback clean prices (MASTER px). Without live prices the
+// analyser prices everything at T+1 after this date, so accrued interest and
+// yields are consistent with the snapshot it is labelled with.
+const SNAPSHOT_AS_OF = "2026-03-31";
 const STALE_DAYS_WARN = 4;
 
 
@@ -29,27 +33,24 @@ function getTenor(matStr, settlement) {
 }
 
 // `settlement`: accrued interest and yields are computed for T+1 settlement
-// after the price date (priceSettlement), not for the moment the page loaded.
+// after the price date (priceSettlement) — the live file's asOf, or the
+// snapshot date — not for the moment the page loaded. Accrued interest and
+// gross yield are always recomputed (MASTER's stored ai/gy are not used).
 // `liveDirty`: DMO dirty prices for exactly this settlement date ({} if none);
 // when present, accrued = dirty − clean instead of being computed.
 function processGilts(liveOverrides, isLive, taxRate, settlement, liveDirty = {}) {
-  return MASTER.filter(g => new Date(g.mat) > settlement).map(g => {
+  const today = new Date();
+  return MASTER.filter(g => new Date(g.mat) > settlement && new Date(g.mat) > today).map(g => {
     const cp = liveOverrides[g.sym] ?? g.px;
     // Accrued interest at settlement, negative inside the ex-dividend window
     // (the buyer forgoes the next coupon; solveYTM then excludes it).
     const terms = settlementTerms(g.c, g.mat, settlement);
     const dmoDirty = isLive ? liveDirty[g.sym] : undefined;
-    const ai = !isLive ? g.ai
-      : Number.isFinite(dmoDirty) ? dmoDirty - cp
-      : terms.ai;
+    const ai = Number.isFinite(dmoDirty) ? dmoDirty - cp : terms.ai;
 
-    // Gross YTM: solveYTM with taxRate=0 when live prices available,
-    // else use the snapshot value from MASTER (already correct for that date).
     // null = no yield in range reprices the gilt; shown as "—" with a warning,
     // never replaced by a stale or boundary value.
-    const grossYTM = isLive
-      ? solveYTM(g.c, g.mat, cp, ai, 0, settlement)
-      : g.gy;
+    const grossYTM = solveYTM(g.c, g.mat, cp, ai, 0, settlement);
 
     const at = taxRate === 0
       ? grossYTM
@@ -335,7 +336,7 @@ export default function GiltTerminal() {
   const [view, setView] = useState(() =>
     typeof window !== "undefined" && window.location.hash.startsWith("#ladder") ? "ladder" : "analyser");
 
-  const settlement = useMemo(() => priceSettlement(isLive ? asOf : null), [isLive, asOf]);
+  const settlement = useMemo(() => priceSettlement(isLive && asOf ? asOf : SNAPSHOT_AS_OF), [isLive, asOf]);
   const dirtyHere = isLive && dirtySettlement === settlement.toISOString().slice(0, 10) ? liveDirty : {};
   const data = processGilts(liveOverrides, isLive, taxRate, settlement, dirtyHere);
   const filtered = applyFilters(data, { matFilter, couponFilter, sortBy });

@@ -7,12 +7,19 @@ UK Debt Management Office's published reference prices.
 
 ```
 .
-├── .github/workflows/refresh-gilt-prices.yml   # Cron job: rebuilds prices each weekday at 18:00 UTC
+├── .github/workflows/refresh-gilt-prices.yml   # Cron job: rebuilds + verifies prices each weekday at 18:00 UTC
 ├── public/gilt-prices.json                     # Daily-refreshed price file (committed by the workflow)
-├── scripts/refresh-gilt-prices.js              # Pure-Node parser: DMO CSV → gilt-prices.json
+├── scripts/
+│   ├── refresh-gilt-prices.js                  # DMO D10B .xls → gilt-prices.json (clean + dirty)
+│   └── verify-gilt-prices.js                   # npm run verify: DMO dirty = clean + our accrued?
 ├── src/
-│   ├── GiltTerminal.jsx                        # The terminal UI
+│   ├── GiltTerminal.jsx                        # Analyser UI (after-tax YTM ranking)
+│   ├── LadderView.jsx                          # Ladder builder UI
+│   ├── giltMath.js                             # Shared maths: coupon schedule, accrued, ex-div, tax, YTM
+│   ├── ladderEngine.js                         # Ladder selection, sizing, cash flows, IRR, cash benchmark
+│   ├── giltUniverse.js                         # Tracked gilts (MASTER) with fallback prices
 │   └── main.jsx                                # React mount
+├── *.test.mjs, test-fixtures/                  # node --test suites + frozen 2026-11-04 prices
 ├── index.html
 ├── package.json
 └── vite.config.js
@@ -24,12 +31,16 @@ UK Debt Management Office's published reference prices.
    and serves `public/gilt-prices.json` at `/gilt-prices.json`.
 2. **Daily refresh.** GitHub Actions runs `scripts/refresh-gilt-prices.js` at 18:00 UTC
    Mon-Fri. The script fetches the DMO's "Daily Reference Prices" CSV, matches each
-   row against the gilts the terminal tracks, and rewrites `public/gilt-prices.json`.
+   row against the gilts the terminal tracks, and rewrites `public/gilt-prices.json` with
+   clean prices (`prices`), DMO dirty prices (`dirty`) and their `settlement` date (T+1).
+   `npm run verify` then checks every dirty price against clean + our accrued interest
+   (±0.005); if it fails, nothing is committed.
 3. **Auto-redeploy.** When the workflow commits a changed JSON file, the host
    (Vercel / Netlify / Pages) detects the push and redeploys.
 4. **Client.** On each page load `GiltTerminal.jsx` does one `fetch('/gilt-prices.json')`,
-   uses those clean prices to recompute after-tax YTM, and shows a stale-data warning
-   if the file is more than 4 days old.
+   prices every gilt for T+1 settlement after the file's `asOf` (using the DMO dirty
+   price when it is for that date), and shows a stale-data warning if the file is more
+   than 4 days old.
 
 ## Local development
 
@@ -38,10 +49,20 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
-To regenerate `public/gilt-prices.json` from the live DMO file:
+To regenerate `public/gilt-prices.json` from the live DMO file, then check it:
 
 ```bash
 npm run refresh
+```
+
+```bash
+npm run verify
+```
+
+Tests (run under both `TZ=UTC` and `TZ=Europe/London`):
+
+```bash
+npm test
 ```
 
 ## Deploying to Vercel
@@ -70,10 +91,30 @@ side never has to change.
 
 ## Notes
 
-- **0% CGT** on gilt redemption gains is built into the math; only coupons are taxed.
-- Accrued interest is computed locally with a 182.5-day half-coupon assumption.
-  This is a small approximation vs. the DMO's Actual/Actual; acceptable for ranking.
-- YTM is solved by bisection over 80 iterations, semi-annual compounding, with
-  `n = round(years × 2)` periods. Off by up to half a period near coupon dates.
+- **Dates** are UTC throughout. Coupon dates are maturity − 6k months, clamped to month
+  end (31 Aug → 28/29 Feb → 31 Aug).
+- **Settlement** is the next business day after the price date (weekends only; UK bank
+  holidays are not modelled).
+- **Accrued interest** is Actual/Actual from the coupon schedule. Within 7 business days
+  of a coupon the gilt trades ex-dividend: the buyer forgoes that coupon and accrued
+  interest is negative. Where the DMO dirty price is available for the settlement date,
+  it is used directly.
+- **Yield to maturity** follows the DMO formula: cash flows are discounted in coupon
+  periods (days to next coupon ÷ days in the period, then whole half-years) with
+  semi-annual compounding, solved by bisection on [−50%, 100%] to 1e-10. If no yield in
+  that range reprices the gilt, it shows "—" with a warning, never a boundary value.
+- **Tax.** Coupons are taxed at the chosen rate; redemption gains are CGT-exempt (TCGA
+  1992 s.115). Accrued income scheme: a cum-div buyer is taxed on the first coupon only
+  net of the accrued interest paid; an ex-div buyer is taxed on the rebate interest
+  (HMRC SAIM4150). The analyser and the ladder share this model.
+- **Ladder IRR** is annual effective (actual/365.25) so it compares directly with the
+  cash rate; analyser yields are semi-annual. Annual = (1 + y/2)² − 1.
+- **Ladder vs cash** values every after-tax coupon and redemption the ladder pays at the
+  cash rate and subtracts its cost. It is positive exactly when the ladder's IRR beats
+  the cash rate.
+- **Ladder options:** inflation-linked liabilities (amounts in today's money), and
+  coupon-offset sizing (coupons received before each liability, held in cash at the
+  cash rate, pay part of it, so less nominal is bought). Each rung shows how long its
+  redemption sits in cash before the liability and what that earns.
 
 Not financial advice. Verify prices before dealing.

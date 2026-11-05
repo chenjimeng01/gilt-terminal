@@ -53,7 +53,7 @@ export function solveIRR(flows) {
 
 // ── Per-gilt pricing at a settlement date ─────────────────────────────────────
 
-const isIndexLinked = g => /index[- ]?linked|\bI\/?L\b/i.test(g.name);
+export const isIndexLinked = g => /index[- ]?linked|\bI\/?L\b/i.test(g.name);
 
 /**
  * Coupon schedule + accrued for a gilt at `settlement`, with the ex-dividend
@@ -75,7 +75,7 @@ export function priceGilt(gilt, cleanPx, settlement, liveDirty = null) {
 // ── Ladder construction ───────────────────────────────────────────────────────
 
 /**
- * Build a cashflow-matched gilt ladder (spec §3, "simple mode" sizing only).
+ * Build a cashflow-matched gilt ladder (spec §3).
  *
  * opts = {
  *   liabilities:   [{ date: 'YYYY-MM' | ISO | Date, amount: £ }]
@@ -87,7 +87,14 @@ export function priceGilt(gilt, cleanPx, settlement, liveDirty = null) {
  *   universe:      gilt rows (MASTER shape: name, c, mat, px, sym)
  *   prices:        { [sym]: cleanPx } live overrides (falls back to row.px)
  *   incrementGBP:  platform nominal increment (default 100)
- *   cashNetRate:   net rate for the cash-alternative benchmark (default 0.03)
+ *   cashNetRate:   net rate for the cash benchmark and for cash held between
+ *                  an inflow and the liability it serves (default 0.03)
+ *   inflation:     annual rate; liability amounts are in today's money and
+ *                  grow at this rate from settlement to their date (default 0)
+ *   sizing:        'simple'       nominal = liability, rounded up (default)
+ *                  'couponOffset' size from the longest rung back, netting off
+ *                                 coupons (and early redemptions) carried to
+ *                                 each liability at cashNetRate
  *   dirtyPrices:   { [sym]: dirtyPx } live DMO dirty prices (optional), used
  *                  only when dirtySettlement equals the ladder's settlement
  *   dirtySettlement: 'YYYY-MM-DD' the dirty prices are for
@@ -107,6 +114,8 @@ export function buildLadder(opts) {
     prices = {},
     incrementGBP = 100,
     cashNetRate = 0.03,
+    inflation = 0,
+    sizing = "simple",
     ais = true,
     dirtyPrices = {},
     dirtySettlement = null,
@@ -117,6 +126,7 @@ export function buildLadder(opts) {
     ? dirtyPrices : {};
   const tEff = accountType === "GIA" ? taxRate : 0;
   const warnings = [];
+  const grow = (from, to) => Math.pow(1 + cashNetRate, (to - from) / YEAR);
 
   const indexLinked = universe.filter(isIndexLinked);
   if (indexLinked.length) {
@@ -127,20 +137,54 @@ export function buildLadder(opts) {
     .filter(g => toDate(g.mat) > settlement);
 
   const rows = (liabilities || [])
-    .map(l => ({ date: toDate(l.date), amount: Number(l.amount) || 0 }))
-    .filter(l => l.amount > 0);
+    .map(l => ({ date: toDate(l.date), amountToday: Number(l.amount) || 0 }))
+    .filter(l => l.amountToday > 0);
 
   const skipped = rows.filter(l => l.date <= settlement);
   if (skipped.length) {
     warnings.push(`${skipped.length} liability date(s) on or before settlement ignored.`);
   }
 
-  const rungs = rows
+  // P2-1: amounts are in today's money; grow each to its date.
+  const ctx = { preference, windowMonths, settlement, prices, tEff, ais, dirtyFor, cashNetRate };
+  const selections = rows
     .filter(l => l.date > settlement)
     .sort((a, b) => a.date - b.date)
-    .map(l => buildRung(l, conv, {
-      preference, windowMonths, settlement, prices, incrementGBP, tEff, ais, dirtyFor,
+    .map(l => ({
+      ...l,
+      amount: l.amountToday * Math.pow(1 + (Number(inflation) || 0), (l.date - settlement) / YEAR),
+    }))
+    .map(l => selectRung(l, conv, ctx));
+
+  // §3.3 sizing
+  const filledSel = selections.filter(x => !x.unfillable);
+  const nominals = new Map();
+  if (sizing === "couponOffset") {
+    // Each inflow (after-tax coupon, redemption) is assigned to the first
+    // liability on or after its date and carried there at cashNetRate. Size
+    // from the longest rung back: rung j covers what the longer, already-sized
+    // rungs' inflows assigned to liability j don't. Inflows are linear in
+    // nominal, so per-£1-nominal flows give the rung's own coverage.
+    // Any surplus from rounding up is not carried forward (conservative).
+    const L = filledSel.map(x => x.liabilityDate);
+    const assign = d => L.findIndex(l => l >= d);
+    const unit = filledSel.map(x => unitInflows(x, ctx).map(f => {
+      const j = assign(f.date);
+      return { j, value: f.cf * grow(f.date, L[j]) };
     }));
+    const credit = L.map(() => 0);
+    for (let j = filledSel.length - 1; j >= 0; j--) {
+      const own = unit[j].filter(f => f.j === j).reduce((s, f) => s + f.value, 0);
+      const need = filledSel[j].liability - credit[j];
+      const nominal = need <= 0 ? 0 : Math.ceil(need / own / incrementGBP) * incrementGBP;
+      nominals.set(filledSel[j], nominal);
+      for (const f of unit[j]) if (f.j < j) credit[f.j] += nominal * f.value;
+    }
+  } else {
+    for (const x of filledSel) nominals.set(x, Math.ceil(x.liability / incrementGBP) * incrementGBP);
+  }
+
+  const rungs = selections.map(x => x.unfillable ? x : finishRung(x, nominals.get(x), ctx));
 
   if (rungs.some(r => r.unfillable)) {
     warnings.push("Some liabilities fall beyond the longest available gilt and are excluded from totals.");
@@ -153,7 +197,7 @@ export function buildLadder(opts) {
   if (unsolved.length) {
     warnings.push(`No yield between −50% and 100% reprices ${unsolved.join(", ")} — ranked last; check the price.`);
   }
-  if (rungs.some(r => !r.unfillable && r.netIRR == null)) {
+  if (rungs.some(r => !r.unfillable && r.nominal > 0 && r.netIRR == null)) {
     warnings.push("Some rungs have no IRR in range (shown as —).");
   }
 
@@ -169,7 +213,7 @@ export function buildLadder(opts) {
     ? filled.reduce((s, r) => s + r.nominal * ((toDate(r.gilt.mat) - settlement) / YEAR), 0) / totNominal
     : null;
 
-  // Surplus income: net coupon cash by UK tax year (§4.3)
+  // Net coupon income by UK tax year (§4.3)
   const surplusByTaxYear = {};
   for (const r of filled) {
     for (const c of r.couponFlows) {
@@ -178,27 +222,50 @@ export function buildLadder(opts) {
     }
   }
 
-  // Cash alternative (§3.5): lump sum today at cashNetRate meeting the same liabilities
+  // Cash benchmark (§3.5), at cashNetRate, annual compounding, actual/365.25:
+  //  - cashAlternative: lump sum today that meets the same liabilities.
+  //  - inflowsPV: every after-tax inflow the ladder pays (coupons and
+  //    redemptions, including surplus and early redemptions), valued at the
+  //    same rate — i.e. as if each were put on deposit until needed.
+  //  - cashAdvantage = inflowsPV − cost: how much better the ladder is than
+  //    cash (> 0 exactly when the ladder's IRR beats cashNetRate).
+  //  - ladderNetCost = cost − value of the surplus over the liabilities
+  //    = cashAlternative − cashAdvantage, comparable with cashAlternative.
+  // The old figure, cashAlternative − cost, ignored the ladder's coupons and
+  // any surplus redemption, so it understated the ladder (e.g. said "£14k
+  // more than cash" for a ladder yielding 4.9% against 3% cash).
+  const discount = t => Math.pow(1 + cashNetRate, -t);
   const cashAlternative = filled.reduce((s, r) =>
-    s + r.liability / Math.pow(1 + cashNetRate, (r.liabilityDate - settlement) / YEAR), 0);
+    s + r.liability * discount((r.liabilityDate - settlement) / YEAR), 0);
+  const cost = filled.reduce((s, r) => s + r.cost, 0);
+  const inflowsPV = allFlows.filter(f => f.t > 0).reduce((s, f) => s + f.cf * discount(f.t), 0);
+  const cashAdvantage = inflowsPV - cost;
 
   const totals = {
     liability: filled.reduce((s, r) => s + r.liability, 0),
+    liabilityToday: filled.reduce((s, r) => s + r.liabilityToday, 0),
     nominal: totNominal,
-    cost: filled.reduce((s, r) => s + r.cost, 0),
+    cost,
     netCoupons: filled.reduce((s, r) => s + r.netCoupons, 0),
-    redemption: filled.reduce((s, r) => s + r.nominal, 0),
+    redemption: totNominal,
+    idleInterest: filled.reduce((s, r) => s + r.idleInterest, 0),
     portfolioIRR,
     weightedAvgLife: wal,
     cashAlternative,
+    inflowsPV,
+    cashAdvantage,
+    ladderNetCost: cashAlternative - cashAdvantage,
     cashNetRate,
+    inflation: Number(inflation) || 0,
+    sizing,
   };
 
   return { settlement, accountType, taxRateEffective: tEff, rungs, totals, surplusByTaxYear, warnings };
 }
 
-function buildRung(liab, universe, ctx) {
-  const { preference, windowMonths, settlement, prices, incrementGBP, tEff, ais, dirtyFor } = ctx;
+/** §3.1–3.2: candidate window and gilt selection for one liability. */
+function selectRung(liab, universe, ctx) {
+  const { preference, windowMonths, settlement, prices, tEff, ais, dirtyFor } = ctx;
 
   // §3.1 candidate filtering: maturity in [liability − window, liability];
   // widen in 6-month steps up to 36 months if empty.
@@ -217,12 +284,14 @@ function buildRung(liab, universe, ctx) {
   const base = {
     liabilityDate: liab.date,
     liability: liab.amount,
+    liabilityToday: liab.amountToday,
     gapFilled: candidates.length > 0 && effWindow > windowMonths,
     effectiveWindowMonths: effWindow,
   };
 
   if (!candidates.length) {
-    return { ...base, unfillable: true, gilt: null, nominal: 0, cost: 0, netCoupons: 0, netIRR: null, cashflows: [], couponFlows: [] };
+    return { ...base, unfillable: true, gilt: null, nominal: 0, cost: 0, netCoupons: 0, netIRR: null,
+      idleInterest: 0, cashflows: [], couponFlows: [] };
   }
 
   // §3.2 selection — net-yield metric is the analyser's solveYTM, fed the real
@@ -239,39 +308,56 @@ function buildRung(liab, universe, ctx) {
       ? (b.atYTM - a.atYTM) || (a.g.c - b.g.c)
       : (a.g.c - b.g.c) || (b.atYTM - a.atYTM)
   );
-  const { g, cleanPx, p, atYTM: atYTMRaw } = scored[0];
-  const atYTM = Number.isFinite(atYTMRaw) ? atYTMRaw : null;
+  const { g, cleanPx, p, atYTM } = scored[0];
+  return {
+    ...base, unsolvedCandidates, unfillable: false,
+    gilt: g, cleanPx, p, atYTM: Number.isFinite(atYTM) ? atYTM : null,
+  };
+}
 
-  // §3.3 sizing: nominal = liability rounded up to the platform increment
-  const nominal = Math.ceil(liab.amount / incrementGBP) * incrementGBP;
+/** After-tax inflows per £1 nominal: coupons (same model as selection) + redemption. */
+function unitInflows(sel, ctx) {
+  const { settlement, tEff, ais } = ctx;
+  const flows = afterTaxCouponFlows(sel.gilt, settlement, 1, tEff, { ais, terms: sel.p.terms })
+    .map(c => ({ date: c.date, cf: c.net }));
+  flows.push({ date: toDate(sel.gilt.mat), cf: 1 }); // redemption at par, untaxed
+  return flows;
+}
 
-  // §3.4 pricing & cashflows
+/** §3.4 pricing and cash flows for a selected rung at a given nominal. */
+function finishRung(sel, nominal, ctx) {
+  const { settlement, tEff, ais, cashNetRate } = ctx;
+  const { p, gilt: g } = sel;
   const cost = nominal * p.dirtyPx / 100;
   const matDate = toDate(g.mat);
 
   // Same after-tax coupon model as the selection metric (afterTaxCouponFlows).
-  const couponFlows = afterTaxCouponFlows(g, settlement, nominal, tEff, { ais, terms: p.terms });
-  const cashflows = [{ t: 0, cf: -cost }];
+  const couponFlows = nominal > 0
+    ? afterTaxCouponFlows(g, settlement, nominal, tEff, { ais, terms: p.terms })
+    : [];
+  const cashflows = nominal > 0 ? [{ t: 0, cf: -cost }] : [];
   for (const c of couponFlows) {
     cashflows.push({ t: (c.date - settlement) / YEAR, cf: c.net });
   }
-  cashflows.push({ t: (matDate - settlement) / YEAR, cf: nominal }); // redemption, untaxed
+  if (nominal > 0) cashflows.push({ t: (matDate - settlement) / YEAR, cf: nominal }); // redemption, untaxed
 
+  // P2-3: redemption cash idles from maturity to the liability date.
+  const idleYears = Math.max(0, (sel.liabilityDate - matDate) / YEAR);
+
+  const { p: _p, ...rest } = sel;
   return {
-    ...base,
-    unsolvedCandidates,
-    unfillable: false,
-    gilt: g,
-    cleanPx,
+    ...rest,
     ai: p.ai,
     dirtyPx: p.dirtyPx,
     exDiv: p.exDiv,
     dirtyFromDMO: p.dirtyFromDMO,
-    atYTM,
     nominal,
     cost,
     netCoupons: couponFlows.reduce((s, c) => s + c.net, 0),
-    netIRR: solveIRR(cashflows),
+    netIRR: nominal > 0 ? solveIRR(cashflows) : null,
+    idleYears,
+    idleMonths: Math.round(idleYears * 12),
+    idleInterest: nominal * (Math.pow(1 + cashNetRate, idleYears) - 1),
     couponFlows,
     cashflows,
   };
