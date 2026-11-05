@@ -184,6 +184,14 @@ export function afterTaxCouponFlows(gilt, settlement, nominal, taxRate, opts = {
  * `ai` is the accrued interest actually paid (negative when ex-div). Pass
  * null to derive it from the coupon schedule at `now`.
  *
+ * Timing follows the DMO yield formula: cash flows are discounted in coupon
+ * periods, not years. A flow on the k-th scheduled coupon date after
+ * settlement (k = 0 for the next one) is discounted over f + k half-years,
+ * f = days to next coupon / days in the current coupon period, at (1 + y/2).
+ * Gross yields therefore match DMO/Bloomberg conventional-gilt yields. (The
+ * ladder's solveIRR deliberately stays on actual/365.25 years with annual
+ * compounding: it values dated cash flows that aren't all on coupon dates.)
+ *
  * Returns annualised yield as a percentage (e.g. 4.16 for 4.16%), or null if
  * maturity has passed or no yield in [−50%, 100%] reprices the gilt.
  */
@@ -194,16 +202,19 @@ export function solveYTM(coupon, matStr, cleanPx, ai, taxRate, now = NOW, opts =
 
   const dp = cleanPx + terms.ai; // dirty price — what you actually pay
   const mat = new Date(matStr);
-  const year = 365.25 * MS_DAY;
+
+  // Periods to each scheduled coupon date: f + k.
+  const f = (terms.next - now) / (terms.next - terms.prev);
+  const idx = new Map(terms.dates.map((d, k) => [d.getTime(), k]));
+  const periods = d => f + idx.get(d.getTime());
 
   const cashFlows = afterTaxCouponFlows({ c: coupon, mat: matStr }, now, 100, taxRate, { ais: opts.ais, terms })
-    .map(f => ({ t: (f.date - now) / year, cf: f.net }));
-  cashFlows.push({ t: (mat - now) / year, cf: 100 }); // redemption, untaxed
+    .map(fl => ({ n: periods(fl.date), cf: fl.net }));
+  cashFlows.push({ n: periods(mat), cf: 100 }); // redemption, untaxed
 
-  // PV using semi-annual compounding (UK gilt convention):
-  // PV = Σ CF_i / (1 + r/2)^(2·t_i)
-  const pv = r => cashFlows.reduce((sum, { t, cf }) =>
-    sum + cf / Math.pow(1 + r / 2, 2 * t), 0);
+  // PV = Σ CF_i / (1 + r/2)^(n_i)
+  const pv = r => cashFlows.reduce((sum, { n, cf }) =>
+    sum + cf / Math.pow(1 + r / 2, n), 0);
 
   // Bisection on [−50%, 100%]. If PV − price has the same sign at both ends
   // there is no root in range: return null rather than a boundary value (the

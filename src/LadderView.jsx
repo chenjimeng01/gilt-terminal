@@ -128,7 +128,7 @@ function CashflowChart({ result }) {
 
 // ── Exports (§4.4) ────────────────────────────────────────────────────────────
 function toCSV(result) {
-  const head = ["Rung date", "Liability GBP", "Gilt", "EPIC", "Maturity", "Coupon %", "Clean", "Dirty", "Nominal GBP", "Cost GBP", "Net coupons GBP", "Redemption GBP", "Net IRR %", "Flags"];
+  const head = ["Rung date", "Liability GBP", "Gilt", "EPIC", "Maturity", "Coupon %", "Clean", "Dirty", "Nominal GBP", "Cost GBP", "Net coupons GBP", "Redemption GBP", "Net IRR % (annual effective)", "Flags"];
   const rows = result.rungs.map(r => r.unfillable
     ? [ymLabel(r.liabilityDate), r.liability, "UNFILLABLE", "", "", "", "", "", "", "", "", "", "", "unfillable"]
     : [ymLabel(r.liabilityDate), r.liability, r.gilt.name, r.gilt.sym, r.gilt.mat, r.gilt.c,
@@ -329,7 +329,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                 <div style={s.cardSub}>{priceStamp}</div>
               </div>
               <div style={s.card}>
-                <div style={s.cardLbl}>Portfolio net IRR</div>
+                <div style={s.cardLbl} title="Annual compounding, actual/365.25 — comparable with the annual cash rate.">Portfolio net IRR (annual eff.)</div>
                 <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) + "%" : "—"}</div>
                 <div style={s.cardSub}>{account === "GIA" ? `after ${Math.round(taxRate * 100)}% on coupons` : "gross — " + account}</div>
               </div>
@@ -360,8 +360,9 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
-                      {[["Need by", 0], ["Liability", 1], ["Gilt", 0], ["EPIC", 0], ["Maturity", 1], ["Coupon", 1], ["Clean £", 1], ["Dirty £", 1], ["Nominal", 1], ["Cost today", 1], ["Net coupons", 1], ["Redemption", 1], ["Net IRR", 1]]
-                        .map(([h, r]) => <th key={h} style={r ? s.thR : s.th}>{h}</th>)}
+                      {[["Need by", 0], ["Liability", 1], ["Gilt", 0], ["EPIC", 0], ["Maturity", 1], ["Coupon", 1], ["Clean £", 1], ["Dirty £", 1], ["Nominal", 1], ["Cost today", 1], ["Net coupons", 1], ["Redemption", 1], ["Net IRR (ann.)", 1]]
+                        .map(([h, r]) => <th key={h} style={r ? s.thR : s.th}
+                          title={h === "Net IRR (ann.)" ? "Annual effective IRR of the rung's after-tax cash flows (actual/365.25). Selection yields are semi-annual: annual = (1 + y/2)² − 1." : undefined}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>

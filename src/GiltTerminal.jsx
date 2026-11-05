@@ -193,8 +193,8 @@ function GiltTable({ data, isLive }) {
                 ["Tenor",            true],
                 ["Clean £",          true],
                 ["Δ Price",          true],
-                ["Gross YTM",        true],
-                ["After-Tax YTM",    true],
+                ["Gross YTM (s.a.)",     true],
+                ["After-Tax YTM (s.a.)", true],
                 ["Deposit Equiv. ▲", true], // renamed + tooltip
                 ["Tax Drag",         true],
                 ["Type",             true],
@@ -203,6 +203,8 @@ function GiltTable({ data, isLive }) {
                 <th key={h} style={right ? s.thR : s.th} title={
                   h === "Deposit Equiv. ▲"
                     ? "Gross yield a fully-taxable deposit/bond would need to match this gilt's after-tax return. Formula: after-tax YTM + (coupon/price) × tax rate. Accurate for low-coupon gilts; slightly understates for high-coupon gilts."
+                    : h.endsWith("(s.a.)")
+                    ? "Semi-annual compounding, DMO convention. Annual effective = (1 + y/2)² − 1."
                     : undefined
                 }>{h}</th>
               ))}
@@ -280,8 +282,11 @@ function MethodologyNote({ taxRate }) {
       {open && (
         <div style={{ ...s.methodBox, marginTop: 8 }}>
           <strong style={{ color: "#1a1916" }}>After-tax YTM</strong> — solved by bisection on the IRR of
-          after-tax cash flows using the exact future coupon schedule (not rounded period count).
-          Each cash flow is discounted by its actual fractional year (Actual/365.25).
+          after-tax cash flows using the exact future coupon schedule. Following the DMO yield
+          formula, cash flows are discounted in coupon periods (days to next coupon ÷ days in the
+          current period, then whole half-years) with semi-annual compounding, so gross YTM is
+          comparable with DMO and Bloomberg yields. Yields are semi-annual (s.a.); the
+          annual-effective equivalent is (1 + y/2)² − 1.
           Coupon income is taxed at {Math.round(taxRate * 100)}%; the redemption gain (£100 − clean price) is
           CGT-exempt under TCGA 1992 s.115. Accrued income scheme: on a cum-dividend purchase
           only the portion of the first coupon accruing <em>after</em> purchase is taxed (relief
