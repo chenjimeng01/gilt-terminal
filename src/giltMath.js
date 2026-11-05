@@ -4,6 +4,31 @@
 // module-level NOW constant).
 
 const NOW = new Date();
+export const MS_DAY = 86400000;
+
+// All date arithmetic is in UTC. Dates are parsed from "YYYY-MM-DD" strings,
+// which JavaScript treats as UTC midnight; mixing in local-time getters and
+// setters shifted coupon dates by an hour across BST and moved accrued
+// interest in the 4th decimal place depending on the viewer's time zone.
+
+/**
+ * Add `n` calendar months in UTC, clamping to the last day of the target
+ * month (31 Aug − 6 months = 28/29 Feb, not 3 Mar).
+ */
+export function addMonthsUTC(d, n) {
+  const y = d.getUTCFullYear(), m = d.getUTCMonth() + n, day = d.getUTCDate();
+  const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m, Math.min(day, lastDay)));
+}
+
+/**
+ * Coupon date k half-years before maturity. Always computed from maturity
+ * (never by stepping from the previous coupon) so a month-end clamp doesn't
+ * stick: 31 Aug → 28 Feb → 31 Aug, not → 28 Aug.
+ */
+function couponDate(mat, k) {
+  return addMonthsUTC(mat, -6 * k);
+}
 
 /**
  * Build the ordered list of all future coupon dates for a gilt.
@@ -11,14 +36,24 @@ const NOW = new Date();
  * then returns the array in chronological order.
  */
 export function futureCouponDates(matStr, now = NOW) {
+  return couponSchedule(matStr, now).dates;
+}
+
+/**
+ * Coupon schedule at `now`: `dates` = all coupon dates strictly after `now`
+ * (chronological), `prev` = the scheduled coupon date on or before `now`
+ * (start of the current coupon period). `prev` is null if maturity has passed.
+ */
+export function couponSchedule(matStr, now = NOW) {
   const mat = new Date(matStr);
   const dates = [];
-  let d = new Date(mat);
+  let k = 0;
+  let d = mat;
   while (d > now) {
-    dates.unshift(new Date(d));
-    d.setUTCMonth(d.getUTCMonth() - 6);
+    dates.unshift(d);
+    d = couponDate(mat, ++k);
   }
-  return dates; // chronological, all strictly after `now`
+  return { dates, prev: dates.length ? d : null };
 }
 
 /**
@@ -32,12 +67,10 @@ export function futureCouponDates(matStr, now = NOW) {
  * by 2–4× for half the year.)
  */
 export function calcAI(coupon, matStr, now = NOW) {
-  const dates = futureCouponDates(matStr, now);
+  const { dates, prev } = couponSchedule(matStr, now);
   if (!dates.length) return 0;
   const next = dates[0];
-  const prev = new Date(next);
-  prev.setUTCMonth(prev.getUTCMonth() - 6);
-  return (coupon / 2) * ((now - prev) / 86400000) / ((next - prev) / 86400000);
+  return (coupon / 2) * ((now - prev) / MS_DAY) / ((next - prev) / MS_DAY);
 }
 
 /**

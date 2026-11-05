@@ -4,9 +4,8 @@
 // after-tax-YTM selection metric; the rung cashflow/IRR model follows the
 // spec (§3.4): every coupon taxed in full, redemption at par untaxed.
 
-import { futureCouponDates, calcAI, solveYTM } from "./giltMath.js";
+import { couponSchedule, calcAI, solveYTM, addMonthsUTC, MS_DAY } from "./giltMath.js";
 
-const MS_DAY = 86400000;
 const YEAR = 365.25 * MS_DAY;
 const EX_DIV_BUSINESS_DAYS = 7;
 
@@ -44,11 +43,7 @@ function subBusinessDays(d, n) {
   return out;
 }
 
-function addMonths(d, n) {
-  const out = new Date(d);
-  out.setUTCMonth(out.getUTCMonth() + n);
-  return out;
-}
+const addMonths = addMonthsUTC;
 
 /** UK tax year label for a date, e.g. 2027-06-01 → "2027/28". */
 export function taxYearLabel(d) {
@@ -88,11 +83,10 @@ const isIndexLinked = g => /index[- ]?linked|\bI\/?L\b/i.test(g.name);
  * (rebate from settlement to the coupon date).
  */
 export function priceGilt(gilt, cleanPx, settlement) {
-  const coupons = futureCouponDates(gilt.mat, settlement);
+  const { dates: coupons, prev } = couponSchedule(gilt.mat, settlement);
   if (!coupons.length) return null;
 
   const next = coupons[0];
-  const prev = addMonths(next, -6);
   const periodDays = (next - prev) / MS_DAY;
 
   const exDiv = settlement >= subBusinessDays(next, EX_DIV_BUSINESS_DAYS);

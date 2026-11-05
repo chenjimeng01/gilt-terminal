@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { calcAI, solveYTM } from "./src/giltMath.js";
+import { calcAI, solveYTM, futureCouponDates, addMonthsUTC } from "./src/giltMath.js";
 import { buildLadder, quickFill } from "./src/ladderEngine.js";
 import { MASTER } from "./src/giltUniverse.js";
 
@@ -90,6 +90,27 @@ test("calcAI: June/December gilts after the December coupon (missed by old candi
   const t = D("2026-12-15");
   // TS28 4½% 7 Jun 2028: prev 7 Dec 2026, next 7 Jun 2027 → 8/182 days
   near(calcAI(4.5, "2028-06-07", t), 2.25 * 8 / 182, 1e-9, "TS28");
+});
+
+// ── P1-4: UTC month arithmetic with month-end clamp ──────────────────────────
+const iso = d => d.toISOString().slice(0, 10);
+
+test("addMonthsUTC clamps to month end", () => {
+  assert.equal(iso(addMonthsUTC(D("2029-08-31"), -6)), "2029-02-28");
+  assert.equal(iso(addMonthsUTC(D("2028-08-31"), -6)), "2028-02-29");
+  assert.equal(iso(addMonthsUTC(D("2027-01-31"), 6)), "2027-07-31");
+  assert.equal(iso(addMonthsUTC(D("2027-03-31"), -1)), "2027-02-28");
+  assert.equal(iso(addMonthsUTC(D("2027-12-15"), 1)), "2028-01-15");
+});
+
+test("futureCouponDates: month-end maturity keeps month-end dates (no drift)", () => {
+  const ds = futureCouponDates("2029-08-31", D("2026-11-06")).map(iso);
+  assert.deepEqual(ds, ["2027-02-28", "2027-08-31", "2028-02-29", "2028-08-31", "2029-02-28", "2029-08-31"]);
+});
+
+test("calcAI: month-end gilt accrues over the clamped period", () => {
+  // 4% 31 Aug 2029, settle 6 Nov 2026: prev 31 Aug 2026, next 28 Feb 2027 → 67/181
+  near(calcAI(4, "2029-08-31", D("2026-11-06")), 2 * 67 / 181, 1e-12);
 });
 
 // ── P0: solveYTM must not clamp ──────────────────────────────────────────────
