@@ -5,8 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { calcAI, solveYTM, futureCouponDates, addMonthsUTC } from "./src/giltMath.js";
-import { buildLadder, quickFill } from "./src/ladderEngine.js";
+import { calcAI, solveYTM, futureCouponDates, addMonthsUTC, settlementTerms, afterTaxCouponFlows } from "./src/giltMath.js";
+import { buildLadder, quickFill, priceGilt } from "./src/ladderEngine.js";
 import { MASTER } from "./src/giltUniverse.js";
 
 const FIXTURE = JSON.parse(
@@ -166,4 +166,85 @@ test("ladder: a candidate with no solvable yield is ranked last and warned about
   assert.equal(out.rungs[0].gilt.sym, "TS27");
   assert.deepEqual(out.rungs[0].unsolvedCandidates, ["T27A"]);
   assert.ok(out.warnings.some(w => /T27A/.test(w)), out.warnings.join("; "));
+});
+
+// ── P1-1 / P1-2 / P1-3: ex-dividend and coupon tax, shared by both views ─────
+// T29K: 4% 22 May 2029. Next coupon Sun 22 Nov 2026; 7 business days before
+// is Thu 12 Nov 2026, so settling Fri 13 Nov is ex-div, Wed 11 Nov is not.
+const T29K = sym("T29K");
+const EXDIV = D("2026-11-13"), CUMDIV = D("2026-11-11");
+
+test("settlementTerms: ex-div window, negative AI, forgone coupon", () => {
+  const ex = settlementTerms(T29K.c, T29K.mat, EXDIV);
+  assert.equal(ex.exDiv, true);
+  near(ex.ai, -2 * 9 / 184, 1e-12);                     // 13→22 Nov over 22 May→22 Nov
+  assert.equal(iso(ex.coupons[0]), "2027-05-22");
+  const cum = settlementTerms(T29K.c, T29K.mat, CUMDIV);
+  assert.equal(cum.exDiv, false);
+  near(cum.ai, 2 * 173 / 184, 1e-12);
+  assert.equal(iso(cum.coupons[0]), "2026-11-22");
+  // analyser and ladder agree
+  assert.deepEqual(priceGilt(T29K, 98.9, EXDIV).coupons, ex.coupons);
+  near(priceGilt(T29K, 98.9, EXDIV).ai, ex.ai, 0);
+});
+
+test("afterTaxCouponFlows: AIS relief on a cum-div first coupon", () => {
+  const f = afterTaxCouponFlows(T29K, CUMDIV, 100, 0.45);
+  const ai = 2 * 173 / 184;
+  near(f[0].tax, 0.45 * (2 - ai), 1e-12, "first coupon taxed on c/2 − AI");
+  near(f[1].tax, 0.45 * 2, 1e-12, "later coupons taxed in full");
+  const noAis = afterTaxCouponFlows(T29K, CUMDIV, 100, 0.45, { ais: false });
+  near(noAis[0].tax, 0.45 * 2, 1e-12, "ais:false taxes every coupon in full");
+});
+
+test("afterTaxCouponFlows: ex-div buyer is taxed on the rebate interest", () => {
+  const f = afterTaxCouponFlows(T29K, EXDIV, 100, 0.45);
+  const rebate = 2 * 9 / 184;
+  assert.equal(f[0].rebate, true);
+  assert.equal(iso(f[0].date), "2026-11-22");
+  near(f[0].net, -0.45 * rebate, 1e-12);
+  near(f[1].tax, 0.45 * 2, 1e-12);
+  const noAis = afterTaxCouponFlows(T29K, EXDIV, 100, 0.45, { ais: false });
+  assert.ok(!noAis.some(x => x.rebate));
+});
+
+test("solveYTM excludes the forgone coupon when ex-div", () => {
+  // At 0% tax, the yield must reprice exactly the coupons the buyer receives.
+  const t = EXDIV, clean = 98.9;
+  const terms = settlementTerms(T29K.c, T29K.mat, t);
+  const y = solveYTM(T29K.c, T29K.mat, clean, terms.ai, 0, t) / 100;
+  const flows = [...terms.coupons.map(d => ({ d, cf: 2 })), { d: D(T29K.mat), cf: 100 }];
+  const pv = flows.reduce((s, { d, cf }) => s + cf / Math.pow(1 + y / 2, 2 * (d - t) / (365.25 * 864e5)), 0);
+  near(pv, clean + terms.ai, 1e-6);
+});
+
+test("ladder selection uses the real (negative) AI and paid coupons", () => {
+  const out = buildLadder({ ...EXAMPLE, universe: [T29K], settlement: EXDIV,
+    liabilities: [{ date: "2029-06", amount: 10000 }] });
+  const r = out.rungs[0];
+  const p = priceGilt(T29K, PRICES.T29K, EXDIV);
+  const honest = solveYTM(T29K.c, T29K.mat, PRICES.T29K, p.ai, 0, EXDIV);
+  // Old metric: AI floored at 0 and the forgone 22 Nov coupon still counted.
+  const full = settlementTerms(T29K.c, T29K.mat, EXDIV).dates;
+  const flows = [...full.map(d => ({ d, cf: 2 })), { d: D(T29K.mat), cf: 100 }];
+  const pvAt = y => flows.reduce((s, { d, cf }) =>
+    s + cf / Math.pow(1 + y / 2, 2 * (d - EXDIV) / (365.25 * 864e5)), 0);
+  let lo = -0.5, hi = 1;
+  while (hi - lo > 1e-12) { const m = (lo + hi) / 2; pvAt(m) > PRICES.T29K ? (lo = m) : (hi = m); }
+  const old = lo * 100;
+  assert.ok(old > honest, "old metric overstated ex-div yield");
+  near(r.atYTM, honest, 1e-9);
+});
+
+test("ladder rung IRR agrees with the selection yield (same tax model)", () => {
+  // Single rung, 45% GIA, nominal = liability exactly: rung IRR (annual) must
+  // equal the after-tax YTM (semi-annual) converted to annual.
+  for (const settle of [CUMDIV, EXDIV]) {
+    const out = buildLadder({ ...EXAMPLE, universe: [T29K], taxRate: 0.45, settlement: settle,
+      liabilities: [{ date: "2029-06", amount: 10000 }] });
+    const r = out.rungs[0];
+    assert.equal(r.gilt.sym, "T29K");
+    const annual = Math.pow(1 + r.atYTM / 200, 2) - 1;
+    near(r.netIRR, annual, 2e-4, `@ ${iso(settle)}`);
+  }
 });

@@ -73,52 +73,134 @@ export function calcAI(coupon, matStr, now = NOW) {
   return (coupon / 2) * ((now - prev) / MS_DAY) / ((next - prev) / MS_DAY);
 }
 
+// ── Business days (weekends only; UK bank holidays not yet modelled) ─────────
+
+export const EX_DIV_BUSINESS_DAYS = 7;
+
+function isWeekend(d) {
+  const wd = d.getUTCDay();
+  return wd === 0 || wd === 6;
+}
+
+/** `n` business days after `d` (weekends skipped). */
+export function addBusinessDays(d, n) {
+  const out = new Date(d);
+  let left = n;
+  while (left > 0) {
+    out.setUTCDate(out.getUTCDate() + 1);
+    if (!isWeekend(out)) left--;
+  }
+  return out;
+}
+
+/** `n` business days before `d` (weekends skipped). */
+export function subBusinessDays(d, n) {
+  const out = new Date(d);
+  let left = n;
+  while (left > 0) {
+    out.setUTCDate(out.getUTCDate() - 1);
+    if (!isWeekend(out)) left--;
+  }
+  return out;
+}
+
+// ── Settlement terms (shared by analyser and ladder) ─────────────────────────
+
 /**
- * Solve after-tax (or gross, when taxRate=0) YTM using exact coupon schedule.
+ * What a buyer settling on `settlement` pays and receives, per £100 nominal.
  *
- * Fixes vs old version:
- *  1. Uses real future coupon dates — no more rounding error on coupon count.
- *  2. Each cash flow discounted by its actual fractional year — correct stub period.
- *  3. First coupon: only the portion accruing AFTER purchase is taxable income;
- *     the accrued interest paid is a return of capital and is not taxed.
- *  4. Redemption gain (£100 - cleanPx) is CGT-exempt — unchanged, still correct.
+ * Ex-dividend rule: if settlement falls on or after the date 7 business days
+ * before the next coupon, the buyer forgoes that coupon (it goes to the
+ * holder of record) and accrued interest is negative — a rebate for the days
+ * from settlement to the coupon date.
+ *
+ * Returns null if the gilt has matured, else
+ *   { prev, next, dates, coupons, exDiv, ai }
+ * where `dates` is every scheduled coupon after settlement and `coupons` the
+ * ones the buyer actually receives.
+ */
+export function settlementTerms(coupon, matStr, settlement = NOW) {
+  const { dates, prev } = couponSchedule(matStr, settlement);
+  if (!dates.length) return null;
+  const next = dates[0];
+  const periodDays = (next - prev) / MS_DAY;
+  const exDiv = settlement >= subBusinessDays(next, EX_DIV_BUSINESS_DAYS);
+  const ai = exDiv
+    ? -(coupon / 2) * ((next - settlement) / MS_DAY) / periodDays
+    : (coupon / 2) * ((settlement - prev) / MS_DAY) / periodDays;
+  return { prev, next, dates, coupons: exDiv ? dates.slice(1) : dates, exDiv, ai };
+}
+
+/**
+ * After-tax coupon cash flows for `nominal` £ of a gilt bought at
+ * `settlement`, taxed at `taxRate`. Redemption is not included (it is
+ * CGT-exempt, TCGA 1992 s.115, and the caller adds it).
+ *
+ * Accrued income scheme (ITA 2007 Part 12; HMRC SAIM4020, SAIM4140–4160):
+ *  - Cum-div purchase: the buyer paid accrued interest in the dirty price and
+ *    gets relief for it against the next coupon, so the first coupon is taxed
+ *    only on (c/2 − AI). (ITA 2007 s.632/s.633; SAIM4140.)
+ *  - Ex-div purchase: the buyer does not receive the next coupon but is
+ *    treated as receiving the rebate interest (|AI|, settlement → coupon
+ *    date) and is taxed on it. (ITA 2007 s.633; SAIM4150, SAIM4160 example;
+ *    CG54506: "the transferee is treated as though they received a sum
+ *    equal to the rebate amount".) Modelled as a tax payment on the forgone
+ *    coupon date, the end of the interest period in which it is charged.
+ *  - opts.ais = false: the scheme does not apply (e.g. total nominal holdings
+ *    never above £5,000 in the tax year or the previous one, ITA 2007 s.639).
+ *    Every coupon received is then taxed in full and the rebate is untaxed.
+ *
+ * Returns [{ date, gross, tax, net, rebate? }] in date order.
+ * `opts.terms` may pass a precomputed settlementTerms result (its `ai` is used).
+ */
+export function afterTaxCouponFlows(gilt, settlement, nominal, taxRate, opts = {}) {
+  const ais = opts.ais ?? true;
+  const terms = opts.terms ?? settlementTerms(gilt.c, gilt.mat, settlement);
+  if (!terms) return [];
+  const semi = nominal * gilt.c / 200;
+  const aiAmt = nominal * terms.ai / 100;
+
+  const flows = terms.coupons.map((date, i) => {
+    const taxable = ais && !terms.exDiv && i === 0 ? Math.max(0, semi - aiAmt) : semi;
+    const tax = taxable * taxRate;
+    return { date, gross: semi, tax, net: semi - tax };
+  });
+  if (ais && terms.exDiv && taxRate > 0) {
+    const tax = -aiAmt * taxRate; // aiAmt < 0 when ex-div
+    flows.unshift({ date: terms.next, gross: 0, tax, net: -tax, rebate: true });
+  }
+  return flows;
+}
+
+/**
+ * Solve after-tax (or gross, when taxRate=0) yield to maturity, per £100
+ * nominal, from the cash flows the buyer actually receives:
+ *
+ *  - Ex-div settlement: the forgone coupon is excluded and accrued is negative.
+ *  - Coupon tax per afterTaxCouponFlows (accrued income scheme on the first
+ *    coupon unless opts.ais === false).
+ *  - Redemption at par, CGT-exempt.
+ *
+ * `ai` is the accrued interest actually paid (negative when ex-div). Pass
+ * null to derive it from the coupon schedule at `now`.
  *
  * Returns annualised yield as a percentage (e.g. 4.16 for 4.16%), or null if
  * maturity has passed or no yield in [−50%, 100%] reprices the gilt.
  */
-export function solveYTM(coupon, matStr, cleanPx, ai, taxRate, now = NOW) {
+export function solveYTM(coupon, matStr, cleanPx, ai, taxRate, now = NOW, opts = {}) {
+  const base = settlementTerms(coupon, matStr, now);
+  if (!base) return null;
+  const terms = ai == null ? base : { ...base, ai };
+
+  const dp = cleanPx + terms.ai; // dirty price — what you actually pay
   const mat = new Date(matStr);
-  if (mat <= now) return null;
+  const year = 365.25 * MS_DAY;
 
-  const dates = futureCouponDates(matStr, now);
-  if (dates.length === 0) return null;
+  const cashFlows = afterTaxCouponFlows({ c: coupon, mat: matStr }, now, 100, taxRate, { ais: opts.ais, terms })
+    .map(f => ({ t: (f.date - now) / year, cf: f.net }));
+  cashFlows.push({ t: (mat - now) / year, cf: 100 }); // redemption, untaxed
 
-  const dp = cleanPx + ai; // dirty price — what you actually pay
-  const semiCoupon = coupon / 2; // gross semi-annual coupon per £100 nominal
-
-  // Build after-tax cash flows with exact timing
-  const cashFlows = dates.map((dt, i) => {
-    const isFirst = i === 0;
-    const isLast  = i === dates.length - 1;
-
-    // First coupon: the accrued interest portion (aiPaid) is a return of capital
-    // (you paid it in the dirty price), so only (semiCoupon - ai) is new income.
-    // Subsequent coupons: fully taxable income.
-    const newIncome = isFirst ? Math.max(0, semiCoupon - ai) : semiCoupon;
-    const returnOfCapital = isFirst ? Math.min(ai, semiCoupon) : 0;
-
-    const afterTaxCouponCF = newIncome * (1 - taxRate) + returnOfCapital;
-
-    // Redemption at par on final date — CGT-exempt, no tax applied
-    const redemption = isLast ? 100 : 0;
-
-    return {
-      t: (dt - now) / (365.25 * 86400000), // fractional years
-      cf: afterTaxCouponCF + redemption,
-    };
-  });
-
-  // PV function using semi-annual compounding (UK gilt convention):
+  // PV using semi-annual compounding (UK gilt convention):
   // PV = Σ CF_i / (1 + r/2)^(2·t_i)
   const pv = r => cashFlows.reduce((sum, { t, cf }) =>
     sum + cf / Math.pow(1 + r / 2, 2 * t), 0);

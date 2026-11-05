@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { calcAI, solveYTM } from "./giltMath.js";
+import { settlementTerms, solveYTM } from "./giltMath.js";
 import { MASTER } from "./giltUniverse.js";
 import LadderView from "./LadderView.jsx";
 
@@ -32,7 +32,10 @@ function getTenor(matStr) {
 function processGilts(liveOverrides, isLive, taxRate) {
   return MASTER.filter(g => new Date(g.mat) > NOW).map(g => {
     const cp = liveOverrides[g.sym] ?? g.px;
-    const ai = isLive ? calcAI(g.c, g.mat) : g.ai;
+    // Accrued interest at settlement, negative inside the ex-dividend window
+    // (the buyer forgoes the next coupon; solveYTM then excludes it).
+    const terms = settlementTerms(g.c, g.mat, NOW);
+    const ai = isLive ? terms.ai : g.ai;
 
     // Gross YTM: solveYTM with taxRate=0 when live prices available,
     // else use the snapshot value from MASTER (already correct for that date).
@@ -51,7 +54,7 @@ function processGilts(liveOverrides, isLive, taxRate) {
     const yrs  = (new Date(g.mat) - NOW) / (365.25 * 86400000);
 
     return {
-      ...g, cp, ai, grossYTM, at, gey, drag, yrs,
+      ...g, cp, ai, exDiv: terms.exDiv, grossYTM, at, gey, drag, yrs,
       tenor: getTenor(g.mat),
       couponType: g.c <= 2 ? "low" : "high",
       dPx: cp - g.px,
@@ -280,12 +283,14 @@ function MethodologyNote({ taxRate }) {
           after-tax cash flows using the exact future coupon schedule (not rounded period count).
           Each cash flow is discounted by its actual fractional year (Actual/365.25).
           Coupon income is taxed at {Math.round(taxRate * 100)}%; the redemption gain (£100 − clean price) is
-          CGT-exempt under TCGA 1992 s.115. On the first coupon, only the portion
-          accruing <em>after</em> purchase is treated as taxable income — the accrued interest
-          paid at purchase is a return of capital.
+          CGT-exempt under TCGA 1992 s.115. Accrued income scheme: on a cum-dividend purchase
+          only the portion of the first coupon accruing <em>after</em> purchase is taxed (relief
+          for the accrued interest paid); on an ex-dividend purchase the next coupon goes to the
+          seller and the buyer is taxed on the rebate interest (HMRC SAIM4150).
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Accrued interest</strong> — Actual/Actual day count
-          (days elapsed ÷ actual days in coupon period), per UK gilt convention.
+          (days elapsed ÷ actual days in coupon period), per UK gilt convention. Within 7 business
+          days of a coupon the gilt trades ex-dividend and accrued interest is negative.
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Deposit Equiv.</strong> — the gross yield a fully-taxable
           deposit or bond would need to match this gilt's after-tax return.

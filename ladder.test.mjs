@@ -66,20 +66,31 @@ test("cost: hand-computed dirty price × nominal", () => {
   assert.ok(Math.abs(r.cost - 44978.26) < 1, `cost ${r.cost}`);
 });
 
-// 4. Tax: 45% GIA vs ISA on the same rung — every coupon cashflow differs by
-//    exactly the tax; redemption identical.
-test("tax: GIA coupons = ISA coupons × (1 − 45%); redemption unchanged", () => {
+// 4. Tax: 45% GIA vs ISA on the same rung. Accrued income scheme: F29 is
+//    bought cum-div with accrued 0.456522 per £100 (see test 3), so on £50,000
+//    nominal £228.26 of the first £250 coupon is relief, and only
+//    £250 − £228.26 = £21.74 is taxed: net = 250 − 0.45 × 21.74 = £240.22.
+//    Every later coupon = ISA × (1 − 45%). Redemption identical.
+//    With ais:false (holdings ≤ £5,000 nominal) every coupon is taxed in full.
+test("tax: GIA vs ISA with accrued income scheme relief on coupon one", () => {
   const liabilities = [{ date: "2029-02", amount: 50000 }];
   const gia = buildLadder({ ...base, liabilities }).rungs[0];
   const isa = buildLadder({ ...base, liabilities, accountType: "ISA" }).rungs[0];
 
   assert.equal(gia.couponFlows.length, isa.couponFlows.length);
-  gia.couponFlows.forEach((c, i) => {
-    assert.ok(Math.abs(c.net - isa.couponFlows[i].net * 0.55) < 1e-9);
+  assert.ok(Math.abs(isa.couponFlows[0].net - 250) < 1e-9);
+  assert.ok(Math.abs(gia.couponFlows[0].net - 240.217) < 0.01, `first ${gia.couponFlows[0].net}`);
+  gia.couponFlows.slice(1).forEach((c, i) => {
+    assert.ok(Math.abs(c.net - isa.couponFlows[i + 1].net * 0.55) < 1e-9);
   });
   // final cashflow is the redemption in both
   assert.equal(gia.cashflows.at(-1).cf, isa.cashflows.at(-1).cf);
   assert.equal(gia.cashflows.at(-1).cf, 50000);
+
+  const noAis = buildLadder({ ...base, liabilities, ais: false }).rungs[0];
+  noAis.couponFlows.forEach((c, i) => {
+    assert.ok(Math.abs(c.net - isa.couponFlows[i].net * 0.55) < 1e-9);
+  });
 });
 
 // 5. IRR: three cashflows, verified by hand.

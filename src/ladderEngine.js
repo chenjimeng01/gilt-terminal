@@ -1,13 +1,18 @@
 // Ladder Builder engine — pure functions, no React, no fetching.
 // Runs identically in the browser (LadderView.jsx) and Node (ladder.test.mjs).
-// Reuses the analyser's maths (giltMath.js) for accrued interest and the
-// after-tax-YTM selection metric; the rung cashflow/IRR model follows the
-// spec (§3.4): every coupon taxed in full, redemption at par untaxed.
+// Shares the analyser's maths (giltMath.js): settlement terms (accrued
+// interest, ex-dividend), after-tax coupon flows (accrued income scheme) and
+// the after-tax-YTM selection metric, so the selection metric and the rung IRR
+// use the same cash flows. Redemption at par is untaxed.
 
-import { couponSchedule, calcAI, solveYTM, addMonthsUTC, MS_DAY } from "./giltMath.js";
+import {
+  settlementTerms, afterTaxCouponFlows, solveYTM, addMonthsUTC, MS_DAY,
+  addBusinessDays,
+} from "./giltMath.js";
+
+export { addBusinessDays };
 
 const YEAR = 365.25 * MS_DAY;
-const EX_DIV_BUSINESS_DAYS = 7;
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -15,32 +20,6 @@ export function toDate(d) {
   if (d instanceof Date) return d;
   if (/^\d{4}-\d{2}$/.test(d)) return new Date(d + "-01"); // month granularity → 1st
   return new Date(d);
-}
-
-function isWeekend(d) {
-  const wd = d.getUTCDay();
-  return wd === 0 || wd === 6;
-}
-
-/** Next business day strictly after `d` (weekends skipped; bank holidays not modelled). */
-export function addBusinessDays(d, n) {
-  const out = new Date(d);
-  let left = n;
-  while (left > 0) {
-    out.setUTCDate(out.getUTCDate() + 1);
-    if (!isWeekend(out)) left--;
-  }
-  return out;
-}
-
-function subBusinessDays(d, n) {
-  const out = new Date(d);
-  let left = n;
-  while (left > 0) {
-    out.setUTCDate(out.getUTCDate() - 1);
-    if (!isWeekend(out)) left--;
-  }
-  return out;
 }
 
 const addMonths = addMonthsUTC;
@@ -78,24 +57,12 @@ const isIndexLinked = g => /index[- ]?linked|\bI\/?L\b/i.test(g.name);
 
 /**
  * Coupon schedule + accrued for a gilt at `settlement`, with the ex-dividend
- * rule (§3.4): if settlement falls within 7 business days before the next
- * coupon date, the buyer forgoes that coupon and accrued goes negative
- * (rebate from settlement to the coupon date).
+ * rule (§3.4) — see settlementTerms in giltMath.js, which the analyser uses too.
  */
 export function priceGilt(gilt, cleanPx, settlement) {
-  const { dates: coupons, prev } = couponSchedule(gilt.mat, settlement);
-  if (!coupons.length) return null;
-
-  const next = coupons[0];
-  const periodDays = (next - prev) / MS_DAY;
-
-  const exDiv = settlement >= subBusinessDays(next, EX_DIV_BUSINESS_DAYS);
-  const ai = exDiv
-    ? -(gilt.c / 2) * ((next - settlement) / MS_DAY) / periodDays
-    : calcAI(gilt.c, gilt.mat, settlement);
-
-  const paidCoupons = exDiv ? coupons.slice(1) : coupons;
-  return { coupons: paidCoupons, exDiv, ai, dirtyPx: cleanPx + ai };
+  const terms = settlementTerms(gilt.c, gilt.mat, settlement);
+  if (!terms) return null;
+  return { coupons: terms.coupons, exDiv: terms.exDiv, ai: terms.ai, dirtyPx: cleanPx + terms.ai, terms };
 }
 
 // ── Ladder construction ───────────────────────────────────────────────────────
@@ -114,6 +81,8 @@ export function priceGilt(gilt, cleanPx, settlement) {
  *   prices:        { [sym]: cleanPx } live overrides (falls back to row.px)
  *   incrementGBP:  platform nominal increment (default 100)
  *   cashNetRate:   net rate for the cash-alternative benchmark (default 0.03)
+ *   ais:           apply the accrued income scheme to coupon tax (default true;
+ *                  false if total nominal holdings never exceed £5,000)
  * }
  */
 export function buildLadder(opts) {
@@ -128,6 +97,7 @@ export function buildLadder(opts) {
     prices = {},
     incrementGBP = 100,
     cashNetRate = 0.03,
+    ais = true,
   } = opts;
 
   const settlement = toDate(settlementIn);
@@ -155,7 +125,7 @@ export function buildLadder(opts) {
     .filter(l => l.date > settlement)
     .sort((a, b) => a.date - b.date)
     .map(l => buildRung(l, conv, {
-      preference, windowMonths, settlement, prices, incrementGBP, tEff,
+      preference, windowMonths, settlement, prices, incrementGBP, tEff, ais,
     }));
 
   if (rungs.some(r => r.unfillable)) {
@@ -214,7 +184,7 @@ export function buildLadder(opts) {
 }
 
 function buildRung(liab, universe, ctx) {
-  const { preference, windowMonths, settlement, prices, incrementGBP, tEff } = ctx;
+  const { preference, windowMonths, settlement, prices, incrementGBP, tEff, ais } = ctx;
 
   // §3.1 candidate filtering: maturity in [liability − window, liability];
   // widen in 6-month steps up to 36 months if empty.
@@ -241,11 +211,12 @@ function buildRung(liab, universe, ctx) {
     return { ...base, unfillable: true, gilt: null, nominal: 0, cost: 0, netCoupons: 0, netIRR: null, cashflows: [], couponFlows: [] };
   }
 
-  // §3.2 selection — net-yield metric reuses the analyser's solveYTM verbatim
+  // §3.2 selection — net-yield metric is the analyser's solveYTM, fed the real
+  // accrued (negative when ex-div), so the forgone coupon is excluded.
   const scored = candidates.map(g => {
     const cleanPx = prices[g.sym] ?? g.px;
     const p = priceGilt(g, cleanPx, settlement);
-    const y = solveYTM(g.c, g.mat, cleanPx, Math.max(0, p.ai), tEff, settlement);
+    const y = solveYTM(g.c, g.mat, cleanPx, p.ai, tEff, settlement, { ais });
     return { g, cleanPx, p, atYTM: y ?? -Infinity, solved: y != null };
   });
   const unsolvedCandidates = scored.filter(x => !x.solved).map(x => x.g.sym);
@@ -262,10 +233,10 @@ function buildRung(liab, universe, ctx) {
 
   // §3.4 pricing & cashflows
   const cost = nominal * p.dirtyPx / 100;
-  const semiNet = nominal * (g.c / 2 / 100) * (1 - tEff);
   const matDate = toDate(g.mat);
 
-  const couponFlows = p.coupons.map(date => ({ date, net: semiNet }));
+  // Same after-tax coupon model as the selection metric (afterTaxCouponFlows).
+  const couponFlows = afterTaxCouponFlows(g, settlement, nominal, tEff, { ais, terms: p.terms });
   const cashflows = [{ t: 0, cf: -cost }];
   for (const c of couponFlows) {
     cashflows.push({ t: (c.date - settlement) / YEAR, cf: c.net });

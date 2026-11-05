@@ -39,11 +39,15 @@ diverges from the spec.
    `futureCouponDates` convention), so the §3.4 ex-div rule *is* implemented: if settlement
    falls within 7 **business days** (weekends excluded; UK bank holidays not modelled — noted
    in the UI tooltip) before the next coupon date, that coupon is skipped and accrued is
-   negative from settlement to the coupon date.
-4. **Coupon taxation differs from the analyser on the first coupon.** The analyser treats
-   purchased accrued as return-of-capital on coupon one; spec §3.4 taxes every coupon in full
-   (`N·c/2·(1−t)`). The engine follows the spec (simpler, conservative — slightly understates
-   net IRR in a GIA). Selection tiebreaks still use the analyser's `solveYTM` untouched.
+   negative from settlement to the coupon date. Since the 2026-11 review this lives in
+   `settlementTerms` (giltMath.js) and the analyser applies it too.
+4. **Coupon taxation — unified (2026-11 review, P1-3).** The analyser and the ladder now share
+   `afterTaxCouponFlows` in `giltMath.js`, so the selection metric and the rung IRR use the same
+   cash flows. Accrued income scheme: a cum-div purchase gets relief on the first coupon for the
+   accrued interest paid (taxed on `c/2 − AI`); an ex-div purchase forgoes the next coupon and
+   the buyer is taxed on the rebate interest (HMRC SAIM4150/SAIM4160, CG54506). `opts.ais = false`
+   (holdings never above £5,000 nominal) taxes every coupon received in full. Earlier versions
+   taxed every ladder coupon in full (spec §3.4), which understated GIA net IRR slightly.
 5. **Cash-alternative default rate:** the terminal has no existing cash-rate assumption, so the
    spec's 3.0% net default applies.
 6. **Settlement default** is T+1 skipping weekends only (no bank-holiday calendar in the app).
