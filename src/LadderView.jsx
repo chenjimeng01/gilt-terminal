@@ -128,16 +128,19 @@ function CashflowChart({ result }) {
 
 // ── Exports (§4.4) ────────────────────────────────────────────────────────────
 function toCSV(result) {
-  const head = ["Rung date", "Liability GBP", "Gilt", "EPIC", "Maturity", "Coupon %", "Clean", "Dirty", "Nominal GBP", "Cost GBP", "Net coupons GBP", "Redemption GBP", "Net IRR %", "Flags"];
+  const head = ["Rung date", "Liability GBP", "Gilt", "EPIC", "Maturity", "Coupon %", "Clean", "Dirty", "Nominal GBP", "Cost GBP", "Net coupons GBP", "Redemption GBP", "Net IRR % (annual effective)", "Idle months", "Idle cash interest GBP", "Flags"];
   const rows = result.rungs.map(r => r.unfillable
-    ? [ymLabel(r.liabilityDate), r.liability, "UNFILLABLE", "", "", "", "", "", "", "", "", "", "", "unfillable"]
-    : [ymLabel(r.liabilityDate), r.liability, r.gilt.name, r.gilt.sym, r.gilt.mat, r.gilt.c,
+    ? [ymLabel(r.liabilityDate), r.liability.toFixed(2), "UNFILLABLE", "", "", "", "", "", "", "", "", "", "", "", "", "unfillable"]
+    : [ymLabel(r.liabilityDate), r.liability.toFixed(2), r.gilt.name, r.gilt.sym, r.gilt.mat, r.gilt.c,
        r.cleanPx.toFixed(2), r.dirtyPx.toFixed(4), r.nominal, r.cost.toFixed(2),
        r.netCoupons.toFixed(2), r.nominal, r.netIRR != null ? (r.netIRR * 100).toFixed(3) : "",
+       r.idleMonths, r.idleInterest.toFixed(2),
        [r.gapFilled && "gap-filled", r.exDiv && "ex-div"].filter(Boolean).join(" ")]);
   const t = result.totals;
-  rows.push(["TOTAL", t.liability, "", "", "", "", "", "", t.nominal, t.cost.toFixed(2), t.netCoupons.toFixed(2), t.redemption,
-    t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) : "", `WAL ${t.weightedAvgLife?.toFixed(1)}y`]);
+  rows.push(["TOTAL", t.liability.toFixed(2), "", "", "", "", "", "", t.nominal, t.cost.toFixed(2), t.netCoupons.toFixed(2), t.redemption,
+    t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) : "", "", t.idleInterest.toFixed(2), `WAL ${t.weightedAvgLife?.toFixed(1)}y`]);
+  rows.push(["CASH BENCHMARK", `at ${(t.cashNetRate * 100).toFixed(2)}% net`, "cash needed", t.cashAlternative.toFixed(2),
+    "ladder inflows PV", t.inflowsPV.toFixed(2), "ladder advantage", t.cashAdvantage.toFixed(2)]);
   return [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
 }
 
@@ -150,7 +153,7 @@ function download(name, text, type) {
 }
 
 // ── Main view ─────────────────────────────────────────────────────────────────
-export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf }) {
+export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf, liveDirty = {}, dirtySettlement = null }) {
   const saved = useMemo(readHash, []);
   const [rows, setRows] = useState(saved?.rows ?? defaultLiabilities());
   const [account, setAccount] = useState(saved?.account ?? "GIA");
@@ -159,12 +162,14 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
   const [increment, setIncrement] = useState(saved?.inc ?? 100);
   const [settle, setSettle] = useState(saved?.settle ?? isoDay(addBusinessDays(new Date(), 1)));
   const [cashRate, setCashRate] = useState(saved?.cash ?? 3.0);
+  const [inflation, setInflation] = useState(saved?.infl ?? 0);
+  const [sizing, setSizing] = useState(saved?.sizing ?? "simple");
   const [qf, setQf] = useState({ amount: 50000, years: 3, start: defaultLiabilities()[0].date });
   const [copied, setCopied] = useState(null);
 
   const inputs = useMemo(
-    () => ({ rows, account, pref, w: windowMonths, inc: increment, settle, cash: cashRate, taxRate }),
-    [rows, account, pref, windowMonths, increment, settle, cashRate, taxRate]
+    () => ({ rows, account, pref, w: windowMonths, inc: increment, settle, cash: cashRate, infl: inflation, sizing, taxRate }),
+    [rows, account, pref, windowMonths, increment, settle, cashRate, inflation, sizing, taxRate]
   );
   const dIn = useDebounced(inputs, 250); // §5: recompute debounced 250ms
 
@@ -182,13 +187,18 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     settlement: dIn.settle,
     universe: MASTER,
     prices: liveOverrides,
+    dirtyPrices: isLive ? liveDirty : {},
+    dirtySettlement: isLive ? dirtySettlement : null,
     incrementGBP: Math.max(1, Number(dIn.inc) || 100),
     cashNetRate: (Number(dIn.cash) || 3) / 100,
-  }), [dIn, liveOverrides]);
+    inflation: (Number(dIn.infl) || 0) / 100,
+    sizing: dIn.sizing === "couponOffset" ? "couponOffset" : "simple",
+  }), [dIn, liveOverrides, isLive, liveDirty, dirtySettlement]);
 
   const t = result.totals;
   const filled = result.rungs.filter(r => !r.unfillable);
-  const vsCash = t.cashAlternative - t.cost;
+  const vsCash = t.cashAdvantage;
+  const inflOn = t.inflation > 0;
   const priceStamp = isLive && asOf ? `Prices as of ${asOf}` : "Prices: snapshot 31 Mar 2026 (fallback)";
 
   const setRow = (i, patch) => setRows(rs => rs.map((r, k) => (k === i ? { ...r, ...patch } : r)));
@@ -200,7 +210,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     setCopied(label);
     setTimeout(() => setCopied(null), 2000);
   });
-  const dealingTicket = () => filled.map(r => `${r.gilt.sym} — nominal ${gbp(r.nominal)} — buy`).join("\n");
+  const dealingTicket = () => filled.filter(r => r.nominal > 0).map(r => `${r.gilt.sym} — nominal ${gbp(r.nominal)} — buy`).join("\n");
 
   const empty = rows.filter(r => Number(r.amount) > 0).length === 0;
 
@@ -258,8 +268,26 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
             </div>
             <input type="date" style={s.inputEl} value={settle} onChange={e => setSettle(e.target.value)} />
           </div>
+          <div style={{ marginBottom: "0.7rem" }}>
+            <div style={{ ...s.fieldRow, marginBottom: 3 }}>
+              <span title="Nominal = liability rounded up (coupons are surplus), or size from the longest rung back so coupons received before each liability, held in cash at the cash rate, pay part of it.">Sizing ▲</span>
+            </div>
+            <select style={s.selectEl} value={sizing} onChange={e => setSizing(e.target.value)}>
+              <option value="simple">Redemption covers each liability</option>
+              <option value="couponOffset">Net off coupons (buys less)</option>
+            </select>
+          </div>
+          <div style={{ marginBottom: "0.7rem" }}>
+            <div style={{ ...s.fieldRow, marginBottom: 3 }}>
+              <span title="Liabilities are entered in today's money and grow at this rate to their dates. 0 = fixed nominal amounts.">Inflation % (liabilities in today's £) ▲</span>
+            </div>
+            <input type="number" min={0} step={0.1} style={s.inputEl} value={inflation}
+              onChange={e => setInflation(e.target.value)} />
+          </div>
           <div>
-            <div style={{ ...s.fieldRow, marginBottom: 3 }}><span>Cash alternative net rate %</span></div>
+            <div style={{ ...s.fieldRow, marginBottom: 3 }}>
+              <span title="Used for the cash comparison and for cash held between a coupon or redemption and the liability it pays.">Cash net rate % ▲</span>
+            </div>
             <input type="number" min={0} step={0.1} style={s.inputEl} value={cashRate}
               onChange={e => setCashRate(e.target.value)} />
           </div>
@@ -329,14 +357,16 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                 <div style={s.cardSub}>{priceStamp}</div>
               </div>
               <div style={s.card}>
-                <div style={s.cardLbl}>Portfolio net IRR</div>
+                <div style={s.cardLbl} title="Annual compounding, actual/365.25 — comparable with the annual cash rate.">Portfolio net IRR (annual eff.)</div>
                 <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) + "%" : "—"}</div>
                 <div style={s.cardSub}>{account === "GIA" ? `after ${Math.round(taxRate * 100)}% on coupons` : "gross — " + account}</div>
               </div>
               <div style={s.card}>
-                <div style={s.cardLbl}>vs cash at {Number(cashRate).toFixed(1)}% net</div>
-                <div style={{ ...s.cardVal, color: vsCash >= 0 ? "#1a6b4a" : "#b91c1c" }}>{vsCash >= 0 ? gbp(vsCash) + " less" : gbp(-vsCash) + " more"}</div>
-                <div style={s.cardSub}>cash needs {gbp(t.cashAlternative)}; the ladder locks these payouts in today — no reinvestment-rate risk</div>
+                <div style={s.cardLbl} title="Every after-tax coupon and redemption the ladder pays, valued at the cash rate (as if put on deposit until needed), minus what the ladder costs. Positive exactly when the ladder's IRR beats the cash rate.">vs cash at {Number(cashRate).toFixed(1)}% net ▲</div>
+                <div style={{ ...s.cardVal, color: vsCash >= 0 ? "#1a6b4a" : "#b91c1c" }}>{vsCash >= 0 ? gbp(vsCash) + " better" : gbp(-vsCash) + " worse"}</div>
+                <div style={s.cardSub} title={`Ladder costs ${gbp(t.cost)}; its inflows are worth ${gbp(t.inflowsPV)} at ${Number(cashRate).toFixed(1)}%, of which ${gbp(t.inflowsPV - t.cashAlternative)} is surplus over the liabilities.`}>
+                  cash needs {gbp(t.cashAlternative)}; ladder {gbp(t.ladderNetCost)} net of surplus
+                </div>
               </div>
               <div style={s.card}>
                 <div style={s.cardLbl}>Weighted avg life</div>
@@ -360,8 +390,9 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
-                      {[["Need by", 0], ["Liability", 1], ["Gilt", 0], ["EPIC", 0], ["Maturity", 1], ["Coupon", 1], ["Clean £", 1], ["Dirty £", 1], ["Nominal", 1], ["Cost today", 1], ["Net coupons", 1], ["Redemption", 1], ["Net IRR", 1]]
-                        .map(([h, r]) => <th key={h} style={r ? s.thR : s.th}>{h}</th>)}
+                      {[["Need by", 0], ["Liability", 1], ["Gilt", 0], ["EPIC", 0], ["Maturity", 1], ["Coupon", 1], ["Clean £", 1], ["Dirty £", 1], ["Nominal", 1], ["Cost today", 1], ["Net coupons", 1], ["Redemption", 1], ["Net IRR (ann.)", 1]]
+                        .map(([h, r]) => <th key={h} style={r ? s.thR : s.th}
+                          title={h === "Net IRR (ann.)" ? "Annual effective IRR of the rung's after-tax cash flows (actual/365.25). Selection yields are semi-annual: annual = (1 + y/2)² − 1." : undefined}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -379,14 +410,21 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                       return (
                         <tr key={i}>
                           <td style={{ ...s.td, background: bg }}>{ymLabel(r.liabilityDate)}</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono }}>{gbp(r.liability)}</td>
+                          <td style={{ ...s.tdR, background: bg, ...s.mono }} title={inflOn ? `${gbp(r.liabilityToday)} in today's money` : undefined}>{gbp(r.liability)}</td>
                           <td style={{ ...s.td, background: bg }}>
                             {r.gilt.name}
                             {r.gapFilled && <span style={{ ...s.badge, background: "#fef3e2", color: "#92600a" }} title={`No gilt within ${windowMonths} months — window widened to ${r.effectiveWindowMonths} months`}>gap-filled</span>}
+                            {r.nominal === 0 && <span style={{ ...s.badge, background: "#e8f5ef", color: "#1a6b4a" }} title="Coupons from longer rungs, held in cash, already cover this liability — nothing to buy.">covered by coupons</span>}
                             {r.exDiv && <span style={{ ...s.badge, background: "#e8f0fb", color: "#2563a8" }} title="Settlement is in the ex-dividend window: the next coupon goes to the seller; accrued is negative.">ex-div</span>}
                           </td>
                           <td style={{ ...s.td, background: bg, ...s.mono, fontSize: 12, color: "#9a978f" }}>{r.gilt.sym}</td>
-                          <td style={{ ...s.tdR, background: bg, color: "#9a978f" }}>{ymLabel(r.gilt.mat)}</td>
+                          <td style={{ ...s.tdR, background: bg, color: "#9a978f" }}
+                            title={r.idleYears > 0 ? `Redeems ${Math.round(r.idleYears * 365.25)} days before the liability; the cash earns ${gbp(r.idleInterest)} at ${Number(cashRate).toFixed(1)}% meanwhile.` : undefined}>
+                            {ymLabel(r.gilt.mat)}
+                            {r.idleYears > 0 && r.nominal > 0 && (
+                              <div style={{ fontSize: 10, lineHeight: 1.3 }}>{r.idleMonths >= 1 ? `${r.idleMonths}m` : `${Math.round(r.idleYears * 365.25)}d`} early · +{gbp(r.idleInterest)}</div>
+                            )}
+                          </td>
                           <td style={{ ...s.tdR, background: bg, ...s.mono, color: "#9a978f" }}>{r.gilt.c.toFixed(3)}%</td>
                           <td style={{ ...s.tdR, background: bg, ...s.mono }}>{r.cleanPx.toFixed(2)}</td>
                           <td style={{ ...s.tdR, background: bg, ...s.mono }}>{r.dirtyPx.toFixed(2)}</td>
@@ -400,9 +438,12 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                     })}
                     <tr>
                       <td style={{ ...s.td, background: "#f2f1ee", fontWeight: 500 }}>Total</td>
-                      <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500 }}>{gbp(t.liability)}</td>
+                      <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500 }} title={inflOn ? `${gbp(t.liabilityToday)} in today's money` : undefined}>{gbp(t.liability)}</td>
                       <td style={{ ...s.td, background: "#f2f1ee", fontSize: 11, color: "#9a978f" }} colSpan={6}>
-                        weighted average life {t.weightedAvgLife != null ? t.weightedAvgLife.toFixed(1) : "—"}y · {priceStamp}
+                        weighted average life {t.weightedAvgLife != null ? t.weightedAvgLife.toFixed(1) : "—"}y
+                        {inflOn && ` · liabilities grown at ${(t.inflation * 100).toFixed(1)}% a year`}
+                        {t.sizing === "couponOffset" && " · sized net of coupons"}
+                        {" · "}{priceStamp}
                       </td>
                       <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500 }}>{gbp(t.nominal)}</td>
                       <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500 }}>{gbp(t.cost)}</td>
@@ -428,7 +469,9 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
               <div style={s.panel}>
                 <div style={s.panelHdr}>
                   <span style={s.panelTtl} title="Coupons are savings income; your Personal Savings Allowance and starting rate for savings may cover some of this. Not modelled here.">
-                    Surplus coupon income by tax year ▲ — {account === "GIA" ? "after tax" : "gross"}, not netted against liabilities
+                    {t.sizing === "couponOffset"
+                      ? <>Coupon income by tax year ▲ — {account === "GIA" ? "after tax" : "gross"}, used towards the liabilities</>
+                      : <>Surplus coupon income by tax year ▲ — {account === "GIA" ? "after tax" : "gross"}, not netted against liabilities</>}
                   </span>
                 </div>
                 <div style={{ padding: "0.8rem 1rem", display: "flex", flexWrap: "wrap", gap: "0.6rem 1.6rem" }}>

@@ -34,6 +34,12 @@ jobs:
       - name: Fetch DMO file and rebuild gilt-prices.json
         run: node scripts/refresh-gilt-prices.js
 
+      # Recompute clean + accrued interest at settlement for every gilt and
+      # compare with the DMO dirty price (±0.005). A failure stops the commit,
+      # so a bad file never replaces the last good one.
+      - name: Verify dirty = clean + accrued
+        run: node scripts/verify-gilt-prices.js --require-dirty
+
       - name: Commit if changed
         run: |
           git config user.name  "github-actions[bot]"

@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
-import { calcAI, solveYTM } from "./giltMath.js";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { settlementTerms, solveYTM, priceSettlement } from "./giltMath.js";
 import { MASTER } from "./giltUniverse.js";
 import LadderView from "./LadderView.jsx";
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const NOW = new Date();
 
 const PRICES_URL_DEFAULT = "/gilt-prices.json";
+// Date of the fallback clean prices (MASTER px). Without live prices the
+// analyser prices everything at T+1 after this date, so accrued interest and
+// yields are consistent with the snapshot it is labelled with.
+const SNAPSHOT_AS_OF = "2026-03-31";
 const STALE_DAYS_WARN = 4;
 
 
@@ -24,49 +27,60 @@ function calcGEY(coupon, cleanPx, atYTM, taxRate) {
   return atYTM / (1 - taxRate);
 }
 
-function getTenor(matStr) {
-  const y = (new Date(matStr) - NOW) / (365.25 * 86400000);
+function getTenor(matStr, settlement) {
+  const y = (new Date(matStr) - settlement) / (365.25 * 86400000);
   return y <= 5 ? "short" : y <= 15 ? "medium" : "long";
 }
 
-function processGilts(liveOverrides, isLive, taxRate) {
-  return MASTER.map(g => {
+// `settlement`: accrued interest and yields are computed for T+1 settlement
+// after the price date (priceSettlement) — the live file's asOf, or the
+// snapshot date — not for the moment the page loaded. Accrued interest and
+// gross yield are always recomputed (MASTER's stored ai/gy are not used).
+// `liveDirty`: DMO dirty prices for exactly this settlement date ({} if none);
+// when present, accrued = dirty − clean instead of being computed.
+function processGilts(liveOverrides, isLive, taxRate, settlement, liveDirty = {}) {
+  const today = new Date();
+  return MASTER.filter(g => new Date(g.mat) > settlement && new Date(g.mat) > today).map(g => {
     const cp = liveOverrides[g.sym] ?? g.px;
-    const ai = isLive ? calcAI(g.c, g.mat) : g.ai;
+    // Accrued interest at settlement, negative inside the ex-dividend window
+    // (the buyer forgoes the next coupon; solveYTM then excludes it).
+    const terms = settlementTerms(g.c, g.mat, settlement);
+    const dmoDirty = isLive ? liveDirty[g.sym] : undefined;
+    const ai = Number.isFinite(dmoDirty) ? dmoDirty - cp : terms.ai;
 
-    // Gross YTM: solveYTM with taxRate=0 when live prices available,
-    // else use the snapshot value from MASTER (already correct for that date).
-    const grossYTM = isLive
-      ? (solveYTM(g.c, g.mat, cp, ai, 0) ?? g.gy)
-      : g.gy;
+    // null = no yield in range reprices the gilt; shown as "—" with a warning,
+    // never replaced by a stale or boundary value.
+    const grossYTM = solveYTM(g.c, g.mat, cp, ai, 0, settlement);
 
     const at = taxRate === 0
       ? grossYTM
-      : solveYTM(g.c, g.mat, cp, ai, taxRate);
+      : solveYTM(g.c, g.mat, cp, ai, taxRate, settlement);
 
-    if (!at) return null;
-
-    const gey  = calcGEY(g.c, cp, at, taxRate);
-    const drag = grossYTM - at;
-    const yrs  = (new Date(g.mat) - NOW) / (365.25 * 86400000);
+    const gey  = at != null ? calcGEY(g.c, cp, at, taxRate) : null;
+    const drag = at != null && grossYTM != null ? grossYTM - at : null;
+    const yrs  = (new Date(g.mat) - settlement) / (365.25 * 86400000);
 
     return {
-      ...g, cp, ai, grossYTM, at, gey, drag, yrs,
-      tenor: getTenor(g.mat),
+      ...g, cp, ai, exDiv: terms.exDiv, grossYTM, at, gey, drag, yrs,
+      tenor: getTenor(g.mat, settlement),
       couponType: g.c <= 2 ? "low" : "high",
       dPx: cp - g.px,
     };
-  }).filter(Boolean);
+  });
 }
+
+// Sort with unsolvable (null) values always last, whatever the direction.
+const nullsLast = (key, cmp) => (a, b) =>
+  a[key] == null ? (b[key] == null ? 0 : 1) : b[key] == null ? -1 : cmp(a, b);
 
 function applyFilters(data, { matFilter, couponFilter, sortBy }) {
   let d = [...data];
   if (matFilter !== "all") d = d.filter(g => g.tenor === matFilter);
   if (couponFilter !== "all") d = d.filter(g => g.couponType === couponFilter);
   const sorts = {
-    atYTM:    (a, b) => b.at - a.at,
-    grossYTM: (a, b) => b.grossYTM - a.grossYTM,
-    taxDrag:  (a, b) => a.drag - b.drag,
+    atYTM:    nullsLast("at", (a, b) => b.at - a.at),
+    grossYTM: nullsLast("grossYTM", (a, b) => b.grossYTM - a.grossYTM),
+    taxDrag:  nullsLast("drag", (a, b) => a.drag - b.drag),
     maturity: (a, b) => new Date(a.mat) - new Date(b.mat),
     cleanPx:  (a, b) => a.cp - b.cp,
   };
@@ -136,8 +150,9 @@ function Notice({ type, children, onDismiss }) {
 }
 
 function SummaryCards({ data, taxRate }) {
-  const best = data[0];
-  const avgDrag = data.length ? data.reduce((s, g) => s + g.drag, 0) / data.length : 0;
+  const solved = data.filter(g => g.at != null && g.drag != null);
+  const best = solved.reduce((b, g) => (!b || g.at > b.at ? g : b), null);
+  const avgDrag = solved.length ? solved.reduce((s, g) => s + g.drag, 0) / solved.length : 0;
   return (
     <div style={s.cards}>
       <div style={s.card}>
@@ -152,7 +167,7 @@ function SummaryCards({ data, taxRate }) {
       </div>
       <div style={s.card}>
         <div style={s.cardLbl}>Avg tax drag</div>
-        <div style={{ ...s.cardVal, color: "#b91c1c" }}>{data.length ? `-${avgDrag.toFixed(2)}%` : "—"}</div>
+        <div style={{ ...s.cardVal, color: "#b91c1c" }}>{solved.length ? `-${avgDrag.toFixed(2)}%` : "—"}</div>
         <div style={s.cardSub}>gross minus after-tax</div>
       </div>
       <div style={s.card}>
@@ -165,7 +180,10 @@ function SummaryCards({ data, taxRate }) {
 }
 
 function GiltTable({ data, isLive }) {
-  const maxAt = data.length ? Math.max(...data.map(g => g.at)) : 1;
+  const solvedAt = data.filter(g => g.at != null).map(g => g.at);
+  const maxAt = solvedAt.length ? Math.max(...solvedAt) : 1;
+  const unsolved = data.filter(g => g.at == null || g.grossYTM == null);
+  const pctFmt = v => (v == null ? "—" : v.toFixed(3) + "%");
   const now = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
   return (
@@ -182,8 +200,8 @@ function GiltTable({ data, isLive }) {
                 ["Tenor",            true],
                 ["Clean £",          true],
                 ["Δ Price",          true],
-                ["Gross YTM",        true],
-                ["After-Tax YTM",    true],
+                ["Gross YTM (s.a.)",     true],
+                ["After-Tax YTM (s.a.)", true],
                 ["Deposit Equiv. ▲", true], // renamed + tooltip
                 ["Tax Drag",         true],
                 ["Type",             true],
@@ -192,17 +210,27 @@ function GiltTable({ data, isLive }) {
                 <th key={h} style={right ? s.thR : s.th} title={
                   h === "Deposit Equiv. ▲"
                     ? "Gross yield a fully-taxable deposit/bond would need to match this gilt's after-tax return. Formula: after-tax YTM + (coupon/price) × tax rate. Accurate for low-coupon gilts; slightly understates for high-coupon gilts."
+                    : h.endsWith("(s.a.)")
+                    ? "Semi-annual compounding, DMO convention. Annual effective = (1 + y/2)² − 1."
                     : undefined
                 }>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
+            {unsolved.length > 0 && (
+              <tr>
+                <td colSpan={13} style={{ ...s.tdBase, background: "#fef3e2", color: "#92600a", fontSize: 12 }}>
+                  ⚠ No yield between −50% and 100% reprices {unsolved.map(g => g.sym).join(", ")} at the
+                  current price and accrued interest — shown as "—". Check the price before relying on it.
+                </td>
+              </tr>
+            )}
             {data.map((g, i) => {
               const isTop = i === 0;
               const rowBg = isTop ? "#e8f5ef" : i % 2 === 0 ? "#fff" : "#fafaf9";
               const matLbl = new Date(g.mat).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
-              const pct = ((g.at / maxAt) * 100).toFixed(1);
+              const pct = g.at != null ? Math.max(0, (g.at / maxAt) * 100).toFixed(1) : "0";
               const dPxCls = g.dPx > 0.005 ? "#1a6b4a" : g.dPx < -0.005 ? "#b91c1c" : "#9a978f";
               const dPxTxt = isLive ? (g.dPx > 0.005 ? `+${g.dPx.toFixed(2)}` : g.dPx < -0.005 ? g.dPx.toFixed(2) : "—") : "—";
               const td = (content, right = false, extra = {}) => (
@@ -217,10 +245,10 @@ function GiltTable({ data, isLive }) {
                   {td(<span style={{ color: "#9a978f", fontSize: 12 }}>{g.yrs.toFixed(1)}y</span>, true)}
                   {td(<span style={{ fontFamily: "DM Mono, monospace" }}>£{g.cp.toFixed(2)}</span>, true)}
                   {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: dPxCls }}>{dPxTxt}</span>, true)}
-                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#9a978f" }}>{g.grossYTM.toFixed(3)}%</span>, true)}
-                  {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 14, fontWeight: 500, color: "#1a6b4a" }}>{g.at.toFixed(3)}%</strong>, true)}
-                  {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 13, fontWeight: 500, color: "#2563a8" }}>{g.gey.toFixed(3)}%</strong>, true)}
-                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#b91c1c" }}>-{g.drag.toFixed(2)}%</span>, true)}
+                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#9a978f" }}>{pctFmt(g.grossYTM)}</span>, true)}
+                  {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 14, fontWeight: 500, color: "#1a6b4a" }}>{pctFmt(g.at)}</strong>, true)}
+                  {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 13, fontWeight: 500, color: "#2563a8" }}>{pctFmt(g.gey)}</strong>, true)}
+                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#b91c1c" }}>{g.drag == null ? "—" : `-${g.drag.toFixed(2)}%`}</span>, true)}
                   {td(
                     <span style={{ display: "inline-block", fontSize: 10, fontWeight: 500, padding: "2px 7px", borderRadius: 12, letterSpacing: "0.03em", ...(g.couponType === "low" ? { background: "#e8f0fb", color: "#2563a8" } : { background: "#fef3e2", color: "#92600a" }) }}>
                       {g.couponType}
@@ -248,7 +276,7 @@ function GiltTable({ data, isLive }) {
 }
 
 // ── Methodology note ──────────────────────────────────────────────────────────
-function MethodologyNote({ taxRate }) {
+function MethodologyNote({ taxRate, settlement }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -261,15 +289,24 @@ function MethodologyNote({ taxRate }) {
       {open && (
         <div style={{ ...s.methodBox, marginTop: 8 }}>
           <strong style={{ color: "#1a1916" }}>After-tax YTM</strong> — solved by bisection on the IRR of
-          after-tax cash flows using the exact future coupon schedule (not rounded period count).
-          Each cash flow is discounted by its actual fractional year (Actual/365.25).
+          after-tax cash flows using the exact future coupon schedule. Following the DMO yield
+          formula, cash flows are discounted in coupon periods (days to next coupon ÷ days in the
+          current period, then whole half-years) with semi-annual compounding, so gross YTM is
+          comparable with DMO and Bloomberg yields. Yields are semi-annual (s.a.); the
+          annual-effective equivalent is (1 + y/2)² − 1.
           Coupon income is taxed at {Math.round(taxRate * 100)}%; the redemption gain (£100 − clean price) is
-          CGT-exempt under TCGA 1992 s.115. On the first coupon, only the portion
-          accruing <em>after</em> purchase is treated as taxable income — the accrued interest
-          paid at purchase is a return of capital.
+          CGT-exempt under TCGA 1992 s.115. Accrued income scheme: on a cum-dividend purchase
+          only the portion of the first coupon accruing <em>after</em> purchase is taxed (relief
+          for the accrued interest paid); on an ex-dividend purchase the next coupon goes to the
+          seller and the buyer is taxed on the rebate interest (HMRC SAIM4150).
+          <br /><br />
+          <strong style={{ color: "#1a1916" }}>Settlement</strong> — accrued interest and yields are
+          for settlement on {settlement.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })},
+          the next business day after the price date (DMO reference prices are for T+1 settlement).
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Accrued interest</strong> — Actual/Actual day count
-          (days elapsed ÷ actual days in coupon period), per UK gilt convention.
+          (days elapsed ÷ actual days in coupon period), per UK gilt convention. Within 7 business
+          days of a coupon the gilt trades ex-dividend and accrued interest is negative.
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Deposit Equiv.</strong> — the gross yield a fully-taxable
           deposit or bond would need to match this gilt's after-tax return.
@@ -294,10 +331,14 @@ export default function GiltTerminal() {
   const [notice, setNotice] = useState(null);
   const [updateStamp, setUpdateStamp] = useState("Prices: snapshot 31 Mar 2026");
   const [asOf, setAsOf] = useState(null);
+  const [liveDirty, setLiveDirty] = useState({});
+  const [dirtySettlement, setDirtySettlement] = useState(null);
   const [view, setView] = useState(() =>
     typeof window !== "undefined" && window.location.hash.startsWith("#ladder") ? "ladder" : "analyser");
 
-  const data = processGilts(liveOverrides, isLive, taxRate);
+  const settlement = useMemo(() => priceSettlement(isLive && asOf ? asOf : SNAPSHOT_AS_OF), [isLive, asOf]);
+  const dirtyHere = isLive && dirtySettlement === settlement.toISOString().slice(0, 10) ? liveDirty : {};
+  const data = processGilts(liveOverrides, isLive, taxRate, settlement, dirtyHere);
   const filtered = applyFilters(data, { matFilter, couponFilter, sortBy });
 
   const refresh = useCallback(async () => {
@@ -325,7 +366,16 @@ export default function GiltTerminal() {
 
       if (n === 0) throw new Error("No usable prices in file");
 
+      const dirty = {};
+      if (j.dirty && typeof j.dirty === "object") {
+        for (const [sym, v] of Object.entries(j.dirty)) {
+          if (typeof v === "number" && Number.isFinite(v) && v > 0) dirty[sym] = v;
+        }
+      }
+
       setLiveOverrides(overrides);
+      setLiveDirty(dirty);
+      setDirtySettlement(typeof j.settlement === "string" ? j.settlement : null);
       setIsLive(true);
       setAsOf(j.asOf || null);
       setUpdateStamp(j.asOf ? `Prices · ${j.asOf}` : `Prices · ${n} loaded`);
@@ -347,6 +397,8 @@ export default function GiltTerminal() {
       }
     } catch (err) {
       setLiveOverrides({});
+      setLiveDirty({});
+      setDirtySettlement(null);
       setIsLive(false);
       setAsOf(null);
       setUpdateStamp("Snapshot 31 Mar 2026");
@@ -411,7 +463,8 @@ export default function GiltTerminal() {
         {/* Body */}
         {view === "ladder" ? (
           <LadderView taxRate={taxRate} setTaxRate={setTaxRate}
-            liveOverrides={liveOverrides} isLive={isLive} asOf={asOf} />
+            liveOverrides={liveOverrides} isLive={isLive} asOf={asOf}
+            liveDirty={liveDirty} dirtySettlement={dirtySettlement} />
         ) : (
         <div style={s.layout}>
           {/* Sidebar */}
@@ -495,7 +548,7 @@ export default function GiltTerminal() {
               }
             </div>
 
-            <MethodologyNote taxRate={taxRate} />
+            <MethodologyNote taxRate={taxRate} settlement={settlement} />
           </main>
         </div>
         )}
