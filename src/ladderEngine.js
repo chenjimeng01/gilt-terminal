@@ -58,11 +58,18 @@ const isIndexLinked = g => /index[- ]?linked|\bI\/?L\b/i.test(g.name);
 /**
  * Coupon schedule + accrued for a gilt at `settlement`, with the ex-dividend
  * rule (§3.4) — see settlementTerms in giltMath.js, which the analyser uses too.
+ *
+ * `liveDirty`: the DMO dirty price for this gilt, if it is for this exact
+ * settlement date. It is then used as-is and accrued = dirty − clean.
  */
-export function priceGilt(gilt, cleanPx, settlement) {
-  const terms = settlementTerms(gilt.c, gilt.mat, settlement);
+export function priceGilt(gilt, cleanPx, settlement, liveDirty = null) {
+  let terms = settlementTerms(gilt.c, gilt.mat, settlement);
   if (!terms) return null;
-  return { coupons: terms.coupons, exDiv: terms.exDiv, ai: terms.ai, dirtyPx: cleanPx + terms.ai, terms };
+  if (Number.isFinite(liveDirty)) terms = { ...terms, ai: liveDirty - cleanPx };
+  return {
+    coupons: terms.coupons, exDiv: terms.exDiv, ai: terms.ai, dirtyPx: cleanPx + terms.ai,
+    terms, dirtyFromDMO: Number.isFinite(liveDirty),
+  };
 }
 
 // ── Ladder construction ───────────────────────────────────────────────────────
@@ -81,6 +88,9 @@ export function priceGilt(gilt, cleanPx, settlement) {
  *   prices:        { [sym]: cleanPx } live overrides (falls back to row.px)
  *   incrementGBP:  platform nominal increment (default 100)
  *   cashNetRate:   net rate for the cash-alternative benchmark (default 0.03)
+ *   dirtyPrices:   { [sym]: dirtyPx } live DMO dirty prices (optional), used
+ *                  only when dirtySettlement equals the ladder's settlement
+ *   dirtySettlement: 'YYYY-MM-DD' the dirty prices are for
  *   ais:           apply the accrued income scheme to coupon tax (default true;
  *                  false if total nominal holdings never exceed £5,000)
  * }
@@ -98,9 +108,13 @@ export function buildLadder(opts) {
     incrementGBP = 100,
     cashNetRate = 0.03,
     ais = true,
+    dirtyPrices = {},
+    dirtySettlement = null,
   } = opts;
 
   const settlement = toDate(settlementIn);
+  const dirtyFor = dirtySettlement && dirtySettlement === settlement.toISOString().slice(0, 10)
+    ? dirtyPrices : {};
   const tEff = accountType === "GIA" ? taxRate : 0;
   const warnings = [];
 
@@ -125,7 +139,7 @@ export function buildLadder(opts) {
     .filter(l => l.date > settlement)
     .sort((a, b) => a.date - b.date)
     .map(l => buildRung(l, conv, {
-      preference, windowMonths, settlement, prices, incrementGBP, tEff, ais,
+      preference, windowMonths, settlement, prices, incrementGBP, tEff, ais, dirtyFor,
     }));
 
   if (rungs.some(r => r.unfillable)) {
@@ -184,7 +198,7 @@ export function buildLadder(opts) {
 }
 
 function buildRung(liab, universe, ctx) {
-  const { preference, windowMonths, settlement, prices, incrementGBP, tEff, ais } = ctx;
+  const { preference, windowMonths, settlement, prices, incrementGBP, tEff, ais, dirtyFor } = ctx;
 
   // §3.1 candidate filtering: maturity in [liability − window, liability];
   // widen in 6-month steps up to 36 months if empty.
@@ -215,7 +229,7 @@ function buildRung(liab, universe, ctx) {
   // accrued (negative when ex-div), so the forgone coupon is excluded.
   const scored = candidates.map(g => {
     const cleanPx = prices[g.sym] ?? g.px;
-    const p = priceGilt(g, cleanPx, settlement);
+    const p = priceGilt(g, cleanPx, settlement, dirtyFor[g.sym]);
     const y = solveYTM(g.c, g.mat, cleanPx, p.ai, tEff, settlement, { ais });
     return { g, cleanPx, p, atYTM: y ?? -Infinity, solved: y != null };
   });
@@ -252,6 +266,7 @@ function buildRung(liab, universe, ctx) {
     ai: p.ai,
     dirtyPx: p.dirtyPx,
     exDiv: p.exDiv,
+    dirtyFromDMO: p.dirtyFromDMO,
     atYTM,
     nominal,
     cost,

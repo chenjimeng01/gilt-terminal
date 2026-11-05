@@ -295,3 +295,15 @@ test("priceSettlement: T+1 business day after asOf (or after today)", () => {
   assert.equal(iso(priceSettlement(null, new Date("2026-11-07T22:30:00Z"))), "2026-11-09"); // Sat → Mon
   assert.equal(iso(priceSettlement(null, new Date("2026-11-05T09:15:00Z"))), "2026-11-06");
 });
+
+// ── Data check (UI side): use the live DMO dirty price when it matches ───────
+test("ladder uses a live dirty price for its settlement date", () => {
+  const dirty = { TS27: 100.5 };
+  const one = { ...EXAMPLE, universe: [sym("TS27")], liabilities: [{ date: "2027-06", amount: 42000 }] };
+  const on = buildLadder({ ...one, dirtyPrices: dirty, dirtySettlement: "2026-11-06" });
+  near(on.rungs[0].dirtyPx, 100.5, 1e-12);
+  near(on.rungs[0].ai, 100.5 - PRICES.TS27, 1e-12);
+  assert.equal(on.rungs[0].dirtyFromDMO, true);
+  const off = buildLadder({ ...one, dirtyPrices: dirty, dirtySettlement: "2026-11-05" });
+  near(off.rungs[0].dirtyPx, 100.462, 0.001);           // different date → computed
+});

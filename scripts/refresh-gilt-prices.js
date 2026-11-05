@@ -2,7 +2,10 @@
 //
 // Fetches the UK DMO Gilt Purchase and Sale Service Daily Reference Prices
 // (report code D10B) and writes public/gilt-prices.json. Each entry records
-// the DMO clean (mid) reference price for that gilt on the trade date.
+// the DMO clean (mid) reference price for that gilt on the trade date
+// (`prices`, kept for compatibility), the DMO dirty price (`dirty`), and the
+// settlement date those prices are for (`settlement`, next business day after
+// `asOf`). `npm run verify` checks dirty = clean + accrued at that settlement.
 //
 // Run by .github/workflows/refresh-gilt-prices.yml at 18:00 UTC Mon-Fri.
 // Requires the `xlsx` package (BIFF8 .xls parser); installed via npm in the
@@ -220,6 +223,15 @@ async function fetchDmoXls(d) {
   }
 }
 
+// DMO reference prices are for next-business-day settlement. Weekends only;
+// UK bank holidays are not modelled yet (same rule as the app).
+export function nextBusinessDay(d) {
+  const out = new Date(d);
+  do out.setUTCDate(out.getUTCDate() + 1);
+  while (out.getUTCDay() === 0 || out.getUTCDay() === 6);
+  return out;
+}
+
 // Plausible gilt price range per £100 nominal. Anything outside it (e.g. an
 // Excel date serial) is not a price column.
 const MIN_PX = 0, MAX_PX = 250;
@@ -277,6 +289,7 @@ function extractGiltRows(buf) {
 
 function matchGilts(rows) {
   const prices = {};
+  const dirty = {};
   const errors = [];
   for (const g of GILTS) {
     const matYear = parseInt(g.mat.slice(0, 4), 10);
@@ -298,8 +311,10 @@ function matchGilts(rows) {
       continue;
     }
     prices[g.sym] = +chosen.clean.toFixed(4);
+    if (Number.isFinite(chosen.dirty)) dirty[g.sym] = +chosen.dirty.toFixed(4);
+    else errors.push(`${g.sym}: no dirty price in DMO row`);
   }
-  return { prices, errors };
+  return { prices, dirty, errors };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -355,7 +370,7 @@ async function main() {
     );
   }
 
-  const { prices, errors } = matchGilts(chosenRows);
+  const { prices, dirty, errors } = matchGilts(chosenRows);
   const matched = Object.keys(prices).length;
   console.log(`Matched ${matched}/${GILTS.length} gilts.`);
   if (errors.length) {
@@ -372,11 +387,13 @@ async function main() {
 
   const out = {
     asOf: fmtIsoDate(chosenDate),
-    source: "UK DMO Daily Reference Prices (D10B, clean mid)",
+    settlement: fmtIsoDate(nextBusinessDay(chosenDate)),
+    source: "UK DMO Daily Reference Prices (D10B, clean and dirty mid)",
     sourceUrl: chosenUrl,
     fetched: new Date().toISOString(),
     count: matched,
     prices,
+    dirty,
   };
 
   // Resolve OUT_PATH relative to repo root (script lives in scripts/).

@@ -30,13 +30,18 @@ function getTenor(matStr, settlement) {
 
 // `settlement`: accrued interest and yields are computed for T+1 settlement
 // after the price date (priceSettlement), not for the moment the page loaded.
-function processGilts(liveOverrides, isLive, taxRate, settlement) {
+// `liveDirty`: DMO dirty prices for exactly this settlement date ({} if none);
+// when present, accrued = dirty − clean instead of being computed.
+function processGilts(liveOverrides, isLive, taxRate, settlement, liveDirty = {}) {
   return MASTER.filter(g => new Date(g.mat) > settlement).map(g => {
     const cp = liveOverrides[g.sym] ?? g.px;
     // Accrued interest at settlement, negative inside the ex-dividend window
     // (the buyer forgoes the next coupon; solveYTM then excludes it).
     const terms = settlementTerms(g.c, g.mat, settlement);
-    const ai = isLive ? terms.ai : g.ai;
+    const dmoDirty = isLive ? liveDirty[g.sym] : undefined;
+    const ai = !isLive ? g.ai
+      : Number.isFinite(dmoDirty) ? dmoDirty - cp
+      : terms.ai;
 
     // Gross YTM: solveYTM with taxRate=0 when live prices available,
     // else use the snapshot value from MASTER (already correct for that date).
@@ -325,11 +330,14 @@ export default function GiltTerminal() {
   const [notice, setNotice] = useState(null);
   const [updateStamp, setUpdateStamp] = useState("Prices: snapshot 31 Mar 2026");
   const [asOf, setAsOf] = useState(null);
+  const [liveDirty, setLiveDirty] = useState({});
+  const [dirtySettlement, setDirtySettlement] = useState(null);
   const [view, setView] = useState(() =>
     typeof window !== "undefined" && window.location.hash.startsWith("#ladder") ? "ladder" : "analyser");
 
   const settlement = useMemo(() => priceSettlement(isLive ? asOf : null), [isLive, asOf]);
-  const data = processGilts(liveOverrides, isLive, taxRate, settlement);
+  const dirtyHere = isLive && dirtySettlement === settlement.toISOString().slice(0, 10) ? liveDirty : {};
+  const data = processGilts(liveOverrides, isLive, taxRate, settlement, dirtyHere);
   const filtered = applyFilters(data, { matFilter, couponFilter, sortBy });
 
   const refresh = useCallback(async () => {
@@ -357,7 +365,16 @@ export default function GiltTerminal() {
 
       if (n === 0) throw new Error("No usable prices in file");
 
+      const dirty = {};
+      if (j.dirty && typeof j.dirty === "object") {
+        for (const [sym, v] of Object.entries(j.dirty)) {
+          if (typeof v === "number" && Number.isFinite(v) && v > 0) dirty[sym] = v;
+        }
+      }
+
       setLiveOverrides(overrides);
+      setLiveDirty(dirty);
+      setDirtySettlement(typeof j.settlement === "string" ? j.settlement : null);
       setIsLive(true);
       setAsOf(j.asOf || null);
       setUpdateStamp(j.asOf ? `Prices · ${j.asOf}` : `Prices · ${n} loaded`);
@@ -379,6 +396,8 @@ export default function GiltTerminal() {
       }
     } catch (err) {
       setLiveOverrides({});
+      setLiveDirty({});
+      setDirtySettlement(null);
       setIsLive(false);
       setAsOf(null);
       setUpdateStamp("Snapshot 31 Mar 2026");
@@ -443,7 +462,8 @@ export default function GiltTerminal() {
         {/* Body */}
         {view === "ladder" ? (
           <LadderView taxRate={taxRate} setTaxRate={setTaxRate}
-            liveOverrides={liveOverrides} isLive={isLive} asOf={asOf} />
+            liveOverrides={liveOverrides} isLive={isLive} asOf={asOf}
+            liveDirty={liveDirty} dirtySettlement={dirtySettlement} />
         ) : (
         <div style={s.layout}>
           {/* Sidebar */}

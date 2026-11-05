@@ -150,7 +150,7 @@ function download(name, text, type) {
 }
 
 // ── Main view ─────────────────────────────────────────────────────────────────
-export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf }) {
+export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf, liveDirty = {}, dirtySettlement = null }) {
   const saved = useMemo(readHash, []);
   const [rows, setRows] = useState(saved?.rows ?? defaultLiabilities());
   const [account, setAccount] = useState(saved?.account ?? "GIA");
@@ -182,9 +182,11 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     settlement: dIn.settle,
     universe: MASTER,
     prices: liveOverrides,
+    dirtyPrices: isLive ? liveDirty : {},
+    dirtySettlement: isLive ? dirtySettlement : null,
     incrementGBP: Math.max(1, Number(dIn.inc) || 100),
     cashNetRate: (Number(dIn.cash) || 3) / 100,
-  }), [dIn, liveOverrides]);
+  }), [dIn, liveOverrides, isLive, liveDirty, dirtySettlement]);
 
   const t = result.totals;
   const filled = result.rungs.filter(r => !r.unfillable);

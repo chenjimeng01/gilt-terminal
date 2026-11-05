@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "refresh": "node scripts/refresh-gilt-prices.js",
-    "test": "TZ=UTC node --test ladder.test.mjs giltMath.test.mjs refresh.test.mjs && TZ=Europe/London node --test ladder.test.mjs giltMath.test.mjs refresh.test.mjs"
+    "test": "TZ=UTC node --test ladder.test.mjs giltMath.test.mjs refresh.test.mjs && TZ=Europe/London node --test ladder.test.mjs giltMath.test.mjs refresh.test.mjs",
+    "verify": "node scripts/verify-gilt-prices.js"
   },
   "dependencies": {
     "react": "^18.3.1",
