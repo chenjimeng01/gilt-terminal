@@ -16,40 +16,28 @@ export function futureCouponDates(matStr, now = NOW) {
   let d = new Date(mat);
   while (d > now) {
     dates.unshift(new Date(d));
-    d.setMonth(d.getMonth() - 6);
+    d.setUTCMonth(d.getUTCMonth() - 6);
   }
   return dates; // chronological, all strictly after `now`
 }
 
 /**
- * Accrued interest — Actual/Actual day count (UK gilt convention).
- * Replaces the old fixed-182.5-day denominator.
+ * Accrued interest per £100 nominal — Actual/Actual (UK gilt convention),
+ * cum-dividend.
+ *
+ * Derived from the coupon schedule: the next coupon is the first scheduled
+ * date strictly after `now`, the previous one is six months before it. (The
+ * old version guessed candidate previous-coupon dates from the maturity month
+ * and missed this year's second coupon for Jan–Jun maturities, overstating AI
+ * by 2–4× for half the year.)
  */
 export function calcAI(coupon, matStr, now = NOW) {
-  const mat = new Date(matStr);
-  const mo = mat.getMonth();
-  const dy = mat.getDate();
-  const yr = now.getFullYear();
-
-  // Candidate last-coupon dates
-  const cands = [
-    new Date(yr,     mo,     dy),
-    new Date(yr,     mo - 6, dy),
-    new Date(yr - 1, mo,     dy),
-    new Date(yr - 1, mo - 6, dy),
-  ].filter(d => d <= now);
-
-  const prevCoupon = cands.reduce((a, b) => (b > a ? b : a));
-
-  // Next coupon = prevCoupon + 6 months
-  const nextCoupon = new Date(prevCoupon);
-  nextCoupon.setMonth(nextCoupon.getMonth() + 6);
-
-  // Actual/Actual: days elapsed / actual days in period
-  const daysElapsed  = (now - prevCoupon)  / 86400000;
-  const periodLength = (nextCoupon - prevCoupon) / 86400000;
-
-  return (coupon / 2) * (daysElapsed / periodLength);
+  const dates = futureCouponDates(matStr, now);
+  if (!dates.length) return 0;
+  const next = dates[0];
+  const prev = new Date(next);
+  prev.setUTCMonth(prev.getUTCMonth() - 6);
+  return (coupon / 2) * ((now - prev) / 86400000) / ((next - prev) / 86400000);
 }
 
 /**
