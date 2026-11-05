@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { calcAI } from "./src/giltMath.js";
+import { calcAI, solveYTM } from "./src/giltMath.js";
 import { buildLadder, quickFill } from "./src/ladderEngine.js";
 import { MASTER } from "./src/giltUniverse.js";
 
@@ -92,6 +92,29 @@ test("calcAI: June/December gilts after the December coupon (missed by old candi
   near(calcAI(4.5, "2028-06-07", t), 2.25 * 8 / 182, 1e-9, "TS28");
 });
 
+// ── P0: solveYTM must not clamp ──────────────────────────────────────────────
+test("solveYTM: overpriced gilt gives a negative yield, never the 0.01% floor", () => {
+  const t = D("2026-11-06");
+  // 4% 7 Mar 2027 at 110 clean + 1.0 AI: only 102 left to receive, so yield is deeply negative.
+  const y = solveYTM(4, "2027-03-07", 110, 1.0, 0, t);
+  assert.ok(y === null || y < 0, `got ${y}`);
+  assert.notEqual(y, 0.01);
+  // 102 / 111 over 0.33y, semi-annual: (1 + r/2)^(2·0.334) = 0.919 → r ≈ −23.96%
+  near(y, -23.96, 0.01);
+});
+
+test("solveYTM: no root in [−50%, 100%] → null, not a boundary value", () => {
+  const t = D("2026-11-06");
+  assert.equal(solveYTM(4, "2027-03-07", 1000, 0, 0, t), null);  // absurdly expensive
+  assert.equal(solveYTM(4, "2027-03-07", 1, 0, 0, t), null);     // absurdly cheap
+});
+
+test("solveYTM: ordinary gilt unchanged (TR27 at fixture price)", () => {
+  const t = D("2026-11-06");
+  const g = sym("TR27");
+  near(solveYTM(g.c, g.mat, PRICES.TR27, calcAI(g.c, g.mat, t), 0, t), 4.564, 0.001);
+});
+
 // ── P0: ladder golden case (spec example) ────────────────────────────────────
 const EXAMPLE = {
   liabilities: quickFill(42000, 5, "2027-06"),
@@ -111,4 +134,15 @@ test("ladder golden: £42k/yr Jun 2027–Jun 2031, GIA 0%, net yield", () => {
   near(ts27.netIRR * 100, 4.31, 0.02, "TS27 IRR");
   near(out.totals.cost, 208976, 2, "cost");
   near(out.totals.portfolioIRR * 100, 4.892, 0.005, "portfolio IRR");
+});
+
+test("ladder: a candidate with no solvable yield is ranked last and warned about", () => {
+  const out = buildLadder({
+    ...EXAMPLE,
+    liabilities: [{ date: "2027-06", amount: 42000 }],
+    prices: { ...PRICES, T27A: 500 },              // T27A absurdly overpriced
+  });
+  assert.equal(out.rungs[0].gilt.sym, "TS27");
+  assert.deepEqual(out.rungs[0].unsolvedCandidates, ["T27A"]);
+  assert.ok(out.warnings.some(w => /T27A/.test(w)), out.warnings.join("; "));
 });

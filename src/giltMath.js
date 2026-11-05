@@ -51,7 +51,7 @@ export function calcAI(coupon, matStr, now = NOW) {
  *  4. Redemption gain (£100 - cleanPx) is CGT-exempt — unchanged, still correct.
  *
  * Returns annualised yield as a percentage (e.g. 4.16 for 4.16%), or null if
- * maturity has passed or too close.
+ * maturity has passed or no yield in [−50%, 100%] reprices the gilt.
  */
 export function solveYTM(coupon, matStr, cleanPx, ai, taxRate, now = NOW) {
   const mat = new Date(matStr);
@@ -90,9 +90,13 @@ export function solveYTM(coupon, matStr, cleanPx, ai, taxRate, now = NOW) {
   const pv = r => cashFlows.reduce((sum, { t, cf }) =>
     sum + cf / Math.pow(1 + r / 2, 2 * t), 0);
 
-  // Bisection — solve for r such that PV(r) = dirty price
-  let lo = 0.0001, hi = 0.50;
-  for (let i = 0; i < 100; i++) {
+  // Bisection on [−50%, 100%]. If PV − price has the same sign at both ends
+  // there is no root in range: return null rather than a boundary value (the
+  // old [0.01%, 50%] bracket silently reported 0.01% for negative yields).
+  let lo = -0.5, hi = 1.0;
+  const fLo = pv(lo) - dp, fHi = pv(hi) - dp;
+  if (!Number.isFinite(fLo) || !Number.isFinite(fHi) || fLo * fHi > 0) return null;
+  while (hi - lo > 1e-10) {
     const mid = (lo + hi) / 2;
     pv(mid) > dp ? (lo = mid) : (hi = mid);
   }

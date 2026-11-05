@@ -171,6 +171,14 @@ export function buildLadder(opts) {
     warnings.push("Some rungs needed a wider maturity window than requested (gap-filled).");
   }
 
+  const unsolved = [...new Set(rungs.flatMap(r => r.unsolvedCandidates || []))];
+  if (unsolved.length) {
+    warnings.push(`No yield between −50% and 100% reprices ${unsolved.join(", ")} — ranked last; check the price.`);
+  }
+  if (rungs.some(r => !r.unfillable && r.netIRR == null)) {
+    warnings.push("Some rungs have no IRR in range (shown as —).");
+  }
+
   const filled = rungs.filter(r => !r.unfillable);
 
   // Portfolio IRR — IRR of the summed cashflow vector (§3.4)
@@ -243,15 +251,17 @@ function buildRung(liab, universe, ctx) {
   const scored = candidates.map(g => {
     const cleanPx = prices[g.sym] ?? g.px;
     const p = priceGilt(g, cleanPx, settlement);
-    const atYTM = solveYTM(g.c, g.mat, cleanPx, Math.max(0, p.ai), tEff, settlement) ?? -Infinity;
-    return { g, cleanPx, p, atYTM };
+    const y = solveYTM(g.c, g.mat, cleanPx, Math.max(0, p.ai), tEff, settlement);
+    return { g, cleanPx, p, atYTM: y ?? -Infinity, solved: y != null };
   });
+  const unsolvedCandidates = scored.filter(x => !x.solved).map(x => x.g.sym);
   scored.sort((a, b) =>
     preference === "netYield"
       ? (b.atYTM - a.atYTM) || (a.g.c - b.g.c)
       : (a.g.c - b.g.c) || (b.atYTM - a.atYTM)
   );
-  const { g, cleanPx, p, atYTM } = scored[0];
+  const { g, cleanPx, p, atYTM: atYTMRaw } = scored[0];
+  const atYTM = Number.isFinite(atYTMRaw) ? atYTMRaw : null;
 
   // §3.3 sizing: nominal = liability rounded up to the platform increment
   const nominal = Math.ceil(liab.amount / incrementGBP) * incrementGBP;
@@ -270,6 +280,7 @@ function buildRung(liab, universe, ctx) {
 
   return {
     ...base,
+    unsolvedCandidates,
     unfillable: false,
     gilt: g,
     cleanPx,
