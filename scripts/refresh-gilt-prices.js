@@ -12,7 +12,7 @@
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as XLSX from "xlsx";
 
 // ── Config ────────────────────────────────────────────────────────────────
@@ -220,6 +220,46 @@ async function fetchDmoXls(d) {
   }
 }
 
+// Plausible gilt price range per £100 nominal. Anything outside it (e.g. an
+// Excel date serial) is not a price column.
+const MIN_PX = 0, MAX_PX = 250;
+
+/**
+ * Parse one D10B row → { name, isin, clean, dirty } or null.
+ *
+ * The DMO format is [Name, CleanPrice, DirtyPrice, ISIN]. Prices are taken by
+ * COLUMN ORDER (first plausible price = clean, second = dirty). They must not
+ * be sorted: for a gilt inside its ex-dividend window accrued interest is
+ * negative, so dirty < clean, and "smallest = clean" would store the dirty
+ * price as the clean one.
+ */
+export function parseGiltRow(row) {
+  if (!Array.isArray(row) || row.length < 2) return null;
+  // Find the gilt-name column (first cell that looks like a name) and the
+  // ISIN column (cell starting with "GB00") — tolerant of column order.
+  let name = null;
+  let isin = null;
+  const nums = [];
+  for (const cell of row) {
+    if (cell == null) continue;
+    if (typeof cell === "string") {
+      const trimmed = cell.trim();
+      if (/^GB00[A-Z0-9]{8}$/i.test(trimmed)) {
+        isin = trimmed.toUpperCase();
+      } else if (trimmed.includes("%") && /\d{4}\s*$/.test(trimmed) && name == null) {
+        name = trimmed;
+      } else if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+        nums.push(parseFloat(trimmed));
+      }
+    } else if (typeof cell === "number" && Number.isFinite(cell)) {
+      nums.push(cell);
+    }
+  }
+  const prices = nums.filter(x => x > MIN_PX && x < MAX_PX);
+  if (!name || prices.length < 1) return null;
+  return { name, isin, clean: prices[0], dirty: prices[1] ?? null };
+}
+
 // Walk through all sheets/rows and return [{ name, isin, clean, dirty }].
 function extractGiltRows(buf) {
   const wb = XLSX.read(buf, { type: "buffer" });
@@ -228,36 +268,8 @@ function extractGiltRows(buf) {
     const ws = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
     for (const row of rows) {
-      if (!Array.isArray(row) || row.length < 2) continue;
-      // Find the gilt-name column (first cell that looks like a name)
-      // and the ISIN column (cell starting with "GB00") — be tolerant of
-      // varying column orders.
-      let name = null;
-      let isin = null;
-      let nums = [];
-      for (const cell of row) {
-        if (cell == null) continue;
-        if (typeof cell === "string") {
-          const trimmed = cell.trim();
-          if (/^GB00[A-Z0-9]{8}$/i.test(trimmed)) {
-            isin = trimmed.toUpperCase();
-          } else if (trimmed.includes("%") && /\d{4}\s*$/.test(trimmed) && name == null) {
-            name = trimmed;
-          } else if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-            nums.push(parseFloat(trimmed));
-          }
-        } else if (typeof cell === "number" && Number.isFinite(cell)) {
-          nums.push(cell);
-        }
-      }
-      if (!name || nums.length < 1) continue;
-      // The DMO format is [Name, CleanPrice, DirtyPrice, ISIN]. Use the
-      // smallest of the numbers as the clean price (dirty = clean + accrued
-      // ≥ clean; both well below 250 so no scale issue).
-      nums.sort((a, b) => a - b);
-      const clean = nums[0];
-      const dirty = nums[1] != null ? nums[1] : null;
-      out.push({ name, isin, clean, dirty });
+      const parsed = parseGiltRow(row);
+      if (parsed) out.push(parsed);
     }
   }
   return out;
@@ -375,7 +387,10 @@ async function main() {
   console.log(`Wrote ${outAbs} (${matched} prices, asOf ${out.asOf}, ${chosenSize} bytes upstream)`);
 }
 
-main().catch(err => {
-  console.error(err.stack || err.message || err);
-  process.exit(1);
-});
+// Run only when executed directly, so tests can import parseGiltRow.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(err => {
+    console.error(err.stack || err.message || err);
+    process.exit(1);
+  });
+}
