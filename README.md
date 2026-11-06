@@ -112,6 +112,12 @@ side never has to change.
 - **Ladder vs cash** values every after-tax coupon and redemption the ladder pays at the
   cash rate and subtracts its cost. It is positive exactly when the ladder's IRR beats
   the cash rate.
+- **Your live prices (✎).** Any gilt's price can be overridden from the analyser or the
+  ladder table, as clean or dirty. It is treated as today's dealing price, so it settles
+  T+1 from today (accrued interest and ex-dividend status at that date); the DMO file's
+  dirty price is ignored for that gilt. The ladder applies the clean price at its own
+  settlement date. Overrides are one-off: page memory only — not saved, not in share
+  links, cleared on reload.
 - **Ladder options:** inflation-linked liabilities (amounts in today's money), and
   coupon-offset sizing (coupons received before each liability, held in cash at the
   cash rate, pay part of it, so less nominal is bought). Each rung shows how long its

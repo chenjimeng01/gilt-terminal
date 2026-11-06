@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { settlementTerms, solveYTM, priceSettlement } from "./giltMath.js";
-import { MASTER } from "./giltUniverse.js";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { priceSettlement } from "./giltMath.js";
+import { analyseGilts } from "./analyserModel.js";
 import LadderView from "./LadderView.jsx";
+import PriceEditor from "./PriceEditor.jsx";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -12,62 +13,6 @@ const PRICES_URL_DEFAULT = "/gilt-prices.json";
 const SNAPSHOT_AS_OF = "2026-03-31";
 const STALE_DAYS_WARN = 4;
 
-
-// ── Maths ─────────────────────────────────────────────────────────────────────
-
-
-/**
- * Deposit-equivalent yield: the gross yield a fully-taxable instrument would
- * need to offer to match this gilt's after-tax return.
- *
- * Formula: atYTM / (1 - taxRate)
- */
-function calcGEY(coupon, cleanPx, atYTM, taxRate) {
-  if (taxRate === 0) return atYTM;
-  return atYTM / (1 - taxRate);
-}
-
-function getTenor(matStr, settlement) {
-  const y = (new Date(matStr) - settlement) / (365.25 * 86400000);
-  return y <= 5 ? "short" : y <= 15 ? "medium" : "long";
-}
-
-// `settlement`: accrued interest and yields are computed for T+1 settlement
-// after the price date (priceSettlement) — the live file's asOf, or the
-// snapshot date — not for the moment the page loaded. Accrued interest and
-// gross yield are always recomputed (MASTER's stored ai/gy are not used).
-// `liveDirty`: DMO dirty prices for exactly this settlement date ({} if none);
-// when present, accrued = dirty − clean instead of being computed.
-function processGilts(liveOverrides, isLive, taxRate, settlement, liveDirty = {}) {
-  const today = new Date();
-  return MASTER.filter(g => new Date(g.mat) > settlement && new Date(g.mat) > today).map(g => {
-    const cp = liveOverrides[g.sym] ?? g.px;
-    // Accrued interest at settlement, negative inside the ex-dividend window
-    // (the buyer forgoes the next coupon; solveYTM then excludes it).
-    const terms = settlementTerms(g.c, g.mat, settlement);
-    const dmoDirty = isLive ? liveDirty[g.sym] : undefined;
-    const ai = Number.isFinite(dmoDirty) ? dmoDirty - cp : terms.ai;
-
-    // null = no yield in range reprices the gilt; shown as "—" with a warning,
-    // never replaced by a stale or boundary value.
-    const grossYTM = solveYTM(g.c, g.mat, cp, ai, 0, settlement);
-
-    const at = taxRate === 0
-      ? grossYTM
-      : solveYTM(g.c, g.mat, cp, ai, taxRate, settlement);
-
-    const gey  = at != null ? calcGEY(g.c, cp, at, taxRate) : null;
-    const drag = at != null && grossYTM != null ? grossYTM - at : null;
-    const yrs  = (new Date(g.mat) - settlement) / (365.25 * 86400000);
-
-    return {
-      ...g, cp, ai, exDiv: terms.exDiv, grossYTM, at, gey, drag, yrs,
-      tenor: getTenor(g.mat, settlement),
-      couponType: g.c <= 2 ? "low" : "high",
-      dPx: cp - g.px,
-    };
-  });
-}
 
 // Sort with unsolvable (null) values always last, whatever the direction.
 const nullsLast = (key, cmp) => (a, b) =>
@@ -96,6 +41,9 @@ const s = {
   logoText: { fontSize: 15, fontWeight: 500, letterSpacing: "-0.01em" },
   logoSub: { fontSize: 12, color: "#9a978f", marginLeft: 4 },
   hdrRight: { display: "flex", alignItems: "center", gap: 10 },
+  editBtn: { border: "1px solid #e0deda", background: "#fff", color: "#9a978f", borderRadius: 4, fontSize: 11, lineHeight: 1, padding: "3px 5px", cursor: "pointer" },
+  manualBadge: { fontSize: 9.5, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", padding: "1px 6px", borderRadius: 10, background: "#fef3e2", color: "#92600a", cursor: "help" },
+  manualBar: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "7px 1.5rem", background: "#fef3e2", borderBottom: "1px solid rgba(146,96,10,.2)", color: "#92600a", fontSize: 12.5 },
   livePill: { display: "flex", alignItems: "center", gap: 5, background: "#e8f5ef", color: "#1a6b4a", padding: "4px 10px", borderRadius: 20, fontSize: 11, fontWeight: 500 },
   stamp: { fontSize: 11, color: "#9a978f" },
   layout: { display: "grid", gridTemplateColumns: "256px 1fr", flex: 1 },
@@ -179,7 +127,8 @@ function SummaryCards({ data, taxRate }) {
   );
 }
 
-function GiltTable({ data, isLive }) {
+function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) {
+  const [editing, setEditing] = useState(null);
   const solvedAt = data.filter(g => g.at != null).map(g => g.at);
   const maxAt = solvedAt.length ? Math.max(...solvedAt) : 1;
   const unsolved = data.filter(g => g.at == null || g.grossYTM == null);
@@ -209,7 +158,9 @@ function GiltTable({ data, isLive }) {
               ].map(([h, right]) => (
                 <th key={h} style={right ? s.thR : s.th} title={
                   h === "Deposit Equiv. ▲"
-                    ? "Gross yield a fully-taxable deposit/bond would need to match this gilt's after-tax return. Formula: after-tax YTM + (coupon/price) × tax rate. Accurate for low-coupon gilts; slightly understates for high-coupon gilts."
+                    ? "Gross yield a fully-taxable deposit would need to match this gilt's after-tax return: after-tax YTM ÷ (1 − tax rate)."
+                    : h === "Clean £"
+                    ? "Click ✎ to enter a live price for a one-off check (not saved)."
                     : h.endsWith("(s.a.)")
                     ? "Semi-annual compounding, DMO convention. Annual effective = (1 + y/2)² − 1."
                     : undefined
@@ -236,14 +187,28 @@ function GiltTable({ data, isLive }) {
               const td = (content, right = false, extra = {}) => (
                 <td style={{ ...(right ? s.tdR : s.tdBase), background: rowBg, ...extra }}>{content}</td>
               );
+              const isManual = g.priceSource === "manual";
+              const settleLbl = g.settlement.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
               return (
-                <tr key={g.sym}>
+                <Fragment key={g.sym}>
+                <tr>
                   {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: isTop ? "#1a6b4a" : "#9a978f", fontWeight: isTop ? 500 : 400 }}>{i + 1}</span>)}
                   {td(<span style={{ fontSize: 13, color: "#1a1916", maxWidth: 195, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{g.name}</span>)}
                   {td(<span style={{ fontFamily: "DM Mono, monospace", color: "#9a978f" }}>{g.c.toFixed(3)}%</span>, true)}
                   {td(<span style={{ color: "#9a978f" }}>{matLbl}</span>, true)}
                   {td(<span style={{ color: "#9a978f", fontSize: 12 }}>{g.yrs.toFixed(1)}y</span>, true)}
-                  {td(<span style={{ fontFamily: "DM Mono, monospace" }}>£{g.cp.toFixed(2)}</span>, true)}
+                  {td(
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      {isManual && (
+                        <span style={s.manualBadge}
+                          title={`Your price (${g.manual.kind} ${g.manual.input}), entered ${new Date(g.manual.enteredAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}, priced for settlement ${settleLbl}. One-off — not saved.`}>
+                          live
+                        </span>
+                      )}
+                      <span style={{ fontFamily: "DM Mono, monospace", fontWeight: isManual ? 500 : 400 }}>£{g.cp.toFixed(2)}</span>
+                      <button style={s.editBtn} onClick={() => setEditing(e => (e === g.sym ? null : g.sym))}
+                        title="Enter a live price for this gilt (one-off)" aria-label={`Edit price for ${g.name}`}>✎</button>
+                    </span>, true)}
                   {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: dPxCls }}>{dPxTxt}</span>, true)}
                   {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#9a978f" }}>{pctFmt(g.grossYTM)}</span>, true)}
                   {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 14, fontWeight: 500, color: "#1a6b4a" }}>{pctFmt(g.at)}</strong>, true)}
@@ -262,6 +227,15 @@ function GiltTable({ data, isLive }) {
                     </div>, true
                   )}
                 </tr>
+                {editing === g.sym && (
+                  <PriceEditor gilt={g} colSpan={13} taxRate={taxRate}
+                    referenceClean={isLive ? liveOverrides[g.sym] ?? g.px : g.px}
+                    current={manual[g.sym] ?? null}
+                    onApply={m => setManual(prev => ({ ...prev, [g.sym]: m }))}
+                    onClear={() => setManual(prev => { const { [g.sym]: _, ...rest } = prev; return rest; })}
+                    onClose={() => setEditing(null)} />
+                )}
+                </Fragment>
               );
             })}
           </tbody>
@@ -310,9 +284,14 @@ function MethodologyNote({ taxRate, settlement }) {
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Deposit Equiv.</strong> — the gross yield a fully-taxable
           deposit or bond would need to match this gilt's after-tax return.
-          Formula: <code>after-tax YTM + (coupon / clean price) × tax rate</code>.
-          This correctly grosses up only the taxable coupon component; the
-          tax-free capital gain needs no gross-up.
+          Formula: <code>after-tax YTM ÷ (1 − tax rate)</code> — a deposit paying that gross rate
+          keeps exactly the gilt's after-tax yield once its interest is taxed.
+          <br /><br />
+          <strong style={{ color: "#1a1916" }}>Your live prices (✎)</strong> — a price you type in is
+          treated as today's dealing price, so it settles T+1 from today: accrued interest and
+          ex-dividend status are taken at that date (a dirty price is converted to clean the same
+          way), and the DMO file's dirty price is not used for that gilt. One-off: not saved,
+          cleared on reload.
         </div>
       )}
     </div>
@@ -332,13 +311,19 @@ export default function GiltTerminal() {
   const [updateStamp, setUpdateStamp] = useState("Prices: snapshot 31 Mar 2026");
   const [asOf, setAsOf] = useState(null);
   const [liveDirty, setLiveDirty] = useState({});
+  // One-off manual prices ({ [sym]: makeManualPrice result }): page memory
+  // only — never persisted, never in the URL, gone on reload.
+  const [manual, setManual] = useState({});
   const [dirtySettlement, setDirtySettlement] = useState(null);
   const [view, setView] = useState(() =>
     typeof window !== "undefined" && window.location.hash.startsWith("#ladder") ? "ladder" : "analyser");
 
   const settlement = useMemo(() => priceSettlement(isLive && asOf ? asOf : SNAPSHOT_AS_OF), [isLive, asOf]);
   const dirtyHere = isLive && dirtySettlement === settlement.toISOString().slice(0, 10) ? liveDirty : {};
-  const data = processGilts(liveOverrides, isLive, taxRate, settlement, dirtyHere);
+  const data = analyseGilts({
+    prices: isLive ? liveOverrides : {}, isLive, taxRate, settlement, liveDirty: dirtyHere, manual,
+  });
+  const manualSyms = Object.keys(manual);
   const filtered = applyFilters(data, { matFilter, couponFilter, sortBy });
 
   const refresh = useCallback(async () => {
@@ -460,11 +445,22 @@ export default function GiltTerminal() {
           </div>
         </header>
 
+        {manualSyms.length > 0 && (
+          <div style={s.manualBar}>
+            <span>
+              ✎ Your live price{manualSyms.length > 1 ? "s" : ""} in use for <strong>{manualSyms.join(", ")}</strong> — in the
+              analyser and the ladder, this visit only (not saved; cleared on reload).
+            </span>
+            <button style={s.editBtn} onClick={() => setManual({})}>Clear all</button>
+          </div>
+        )}
+
         {/* Body */}
         {view === "ladder" ? (
           <LadderView taxRate={taxRate} setTaxRate={setTaxRate}
             liveOverrides={liveOverrides} isLive={isLive} asOf={asOf}
-            liveDirty={liveDirty} dirtySettlement={dirtySettlement} />
+            liveDirty={liveDirty} dirtySettlement={dirtySettlement}
+            manual={manual} setManual={setManual} />
         ) : (
         <div style={s.layout}>
           {/* Sidebar */}
@@ -543,7 +539,8 @@ export default function GiltTerminal() {
                 </div>
               </div>
               {filtered.length > 0
-                ? <GiltTable data={filtered} isLive={isLive} />
+                ? <GiltTable data={filtered} isLive={isLive} liveOverrides={liveOverrides}
+                    manual={manual} setManual={setManual} taxRate={taxRate} />
                 : <div style={{ padding: "3rem 2rem", textAlign: "center", color: "#9a978f" }}>No gilts match the current filters.</div>
               }
             </div>
