@@ -1,6 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { MASTER } from "./giltUniverse.js";
 import { buildLadder, quickFill, addBusinessDays, toDate } from "./ladderEngine.js";
+import { ladderPriceInputs } from "./manualPrices.js";
+import PriceEditor from "./PriceEditor.jsx";
 
 const MAX_RUNGS = 20;
 
@@ -33,6 +35,8 @@ const s = {
   noticeWarn: { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#fef3e2", color: "#92600a", border: "1px solid rgba(146,96,10,.2)" },
   noticeInfo: { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#e8f0fb", color: "#2563a8", border: "1px solid rgba(37,99,168,.18)" },
   mono: { fontFamily: "DM Mono, monospace" },
+  editBtn: { border: "1px solid #e0deda", background: "#fff", color: "#9a978f", borderRadius: 4, fontSize: 11, lineHeight: 1, padding: "3px 5px", cursor: "pointer", marginLeft: 5 },
+  manualBadge: { fontSize: 9.5, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", padding: "1px 6px", borderRadius: 10, background: "#fef3e2", color: "#92600a", cursor: "help", marginRight: 5 },
   badge: { display: "inline-block", fontSize: 10, fontWeight: 500, padding: "2px 7px", borderRadius: 12, letterSpacing: "0.03em", marginLeft: 6 },
 };
 
@@ -153,7 +157,8 @@ function download(name, text, type) {
 }
 
 // ── Main view ─────────────────────────────────────────────────────────────────
-export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf, liveDirty = {}, dirtySettlement = null }) {
+export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf, liveDirty = {}, dirtySettlement = null, manual = {}, setManual }) {
+  const [editing, setEditing] = useState(null);
   const saved = useMemo(readHash, []);
   const [rows, setRows] = useState(saved?.rows ?? defaultLiabilities());
   const [account, setAccount] = useState(saved?.account ?? "GIA");
@@ -178,6 +183,13 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     writeHash(toSave);
   }, [dIn]);
 
+  // File prices with the user's one-off live prices on top (their DMO dirty
+  // prices dropped — the ladder computes accrued at its own settlement).
+  const priceInputs = useMemo(
+    () => ladderPriceInputs({ prices: liveOverrides, isLive, liveDirty, dirtySettlement, manual }),
+    [liveOverrides, isLive, liveDirty, dirtySettlement, manual]
+  );
+
   const result = useMemo(() => buildLadder({
     liabilities: dIn.rows,
     accountType: dIn.account,
@@ -186,20 +198,22 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     windowMonths: Number(dIn.w) || 12,
     settlement: dIn.settle,
     universe: MASTER,
-    prices: liveOverrides,
-    dirtyPrices: isLive ? liveDirty : {},
-    dirtySettlement: isLive ? dirtySettlement : null,
+    prices: priceInputs.prices,
+    dirtyPrices: priceInputs.dirtyPrices,
+    dirtySettlement: priceInputs.dirtySettlement,
     incrementGBP: Math.max(1, Number(dIn.inc) || 100),
     cashNetRate: (Number(dIn.cash) || 3) / 100,
     inflation: (Number(dIn.infl) || 0) / 100,
     sizing: dIn.sizing === "couponOffset" ? "couponOffset" : "simple",
-  }), [dIn, liveOverrides, isLive, liveDirty, dirtySettlement]);
+  }), [dIn, priceInputs]);
 
   const t = result.totals;
   const filled = result.rungs.filter(r => !r.unfillable);
   const vsCash = t.cashAdvantage;
   const inflOn = t.inflation > 0;
-  const priceStamp = isLive && asOf ? `Prices as of ${asOf}` : "Prices: snapshot 31 Mar 2026 (fallback)";
+  const nManual = priceInputs.manualSyms.length;
+  const priceStamp = (isLive && asOf ? `Prices as of ${asOf}` : "Prices: snapshot 31 Mar 2026 (fallback)") +
+    (nManual ? ` + ${nManual} live price${nManual > 1 ? "s" : ""} you entered` : "");
 
   const setRow = (i, patch) => setRows(rs => rs.map((r, k) => (k === i ? { ...r, ...patch } : r)));
   const addRow = () => setRows(rs => rs.length >= MAX_RUNGS ? rs : [...rs, { date: rs.at(-1)?.date ?? defaultLiabilities()[0].date, amount: 50000 }]);
@@ -408,7 +422,8 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                         </tr>
                       );
                       return (
-                        <tr key={i}>
+                        <Fragment key={i}>
+                        <tr>
                           <td style={{ ...s.td, background: bg }}>{ymLabel(r.liabilityDate)}</td>
                           <td style={{ ...s.tdR, background: bg, ...s.mono }} title={inflOn ? `${gbp(r.liabilityToday)} in today's money` : undefined}>{gbp(r.liability)}</td>
                           <td style={{ ...s.td, background: bg }}>
@@ -426,7 +441,15 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                             )}
                           </td>
                           <td style={{ ...s.tdR, background: bg, ...s.mono, color: "#9a978f" }}>{r.gilt.c.toFixed(3)}%</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono }}>{r.cleanPx.toFixed(2)}</td>
+                          <td style={{ ...s.tdR, background: bg, ...s.mono }}>
+                            {manual[r.gilt.sym] && (
+                              <span style={s.manualBadge}
+                                title={`Your price: ${manual[r.gilt.sym].kind} ${manual[r.gilt.sym].input}. Applied as clean ${manual[r.gilt.sym].clean.toFixed(4)} at this ladder's settlement date. One-off — not saved.`}>live</span>
+                            )}
+                            {r.cleanPx.toFixed(2)}
+                            <button style={s.editBtn} onClick={() => setEditing(e => (e === i ? null : i))}
+                              title="Enter a live price for this gilt (one-off)" aria-label={`Edit price for ${r.gilt.name}`}>✎</button>
+                          </td>
                           <td style={{ ...s.tdR, background: bg, ...s.mono }}>{r.dirtyPx.toFixed(2)}</td>
                           <td style={{ ...s.tdR, background: bg, ...s.mono }}>{gbp(r.nominal)}</td>
                           <td style={{ ...s.tdR, background: bg, ...s.mono, fontWeight: 500 }}>{gbp(r.cost)}</td>
@@ -434,6 +457,16 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                           <td style={{ ...s.tdR, background: bg, ...s.mono }}>{gbp(r.nominal)}</td>
                           <td style={{ ...s.tdR, background: bg }}><strong style={{ ...s.mono, fontSize: 13, fontWeight: 500, color: "#1a6b4a" }}>{r.netIRR != null ? (r.netIRR * 100).toFixed(3) + "%" : "—"}</strong></td>
                         </tr>
+                        {editing === i && (
+                          <PriceEditor gilt={r.gilt} colSpan={13} taxRate={account === "GIA" ? taxRate : 0}
+                            referenceClean={isLive ? liveOverrides[r.gilt.sym] ?? r.gilt.px : r.gilt.px}
+                            current={manual[r.gilt.sym] ?? null}
+                            note={`The ladder applies your clean price at its settlement date (${isoDay(result.settlement)}), so its dirty price and IRR use accrued interest at that date. Changing the price can change which gilt a rung picks.`}
+                            onApply={m => setManual(prev => ({ ...prev, [r.gilt.sym]: m }))}
+                            onClear={() => setManual(prev => { const { [r.gilt.sym]: _, ...rest } = prev; return rest; })}
+                            onClose={() => setEditing(null)} />
+                        )}
+                        </Fragment>
                       );
                     })}
                     <tr>
