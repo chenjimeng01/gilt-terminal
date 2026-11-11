@@ -105,9 +105,25 @@ export function subBusinessDays(d, n) {
 }
 
 /**
- * Settlement date for prices dated `asOf` ("YYYY-MM-DD"): DMO reference prices
- * are for next-business-day settlement, so T+1 after asOf. Without an asOf
+ * Settlement date the DMO's D10B dirty prices are quoted for: three business
+ * days after the trade date (`asOf`, "YYYY-MM-DD"). Established from the file
+ * itself — dirty − clean equals accrued interest at T+3 to four decimals, and
+ * is out by one or two days' accrual at T+2 / T+1. Returns UTC midnight.
+ */
+export const DMO_DIRTY_SETTLEMENT_BUSINESS_DAYS = 3;
+
+export function dmoDirtySettlement(asOf) {
+  return addBusinessDays(new Date(asOf + "T00:00:00Z"), DMO_DIRTY_SETTLEMENT_BUSINESS_DAYS);
+}
+
+/**
+ * Settlement date the app prices at for prices dated `asOf` ("YYYY-MM-DD"):
+ * the next business day (T+1, the gilt market convention). Without an asOf
  * (snapshot prices), T+1 after `today`'s UTC date. Returns UTC midnight.
+ *
+ * This is not the date the DMO file's dirty prices are for (see
+ * dmoDirtySettlement), so the app applies the DMO clean price with its own
+ * accrued interest rather than the DMO dirty price.
  */
 export function priceSettlement(asOf, today = new Date()) {
   const base = asOf

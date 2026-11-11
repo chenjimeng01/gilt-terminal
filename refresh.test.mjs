@@ -1,7 +1,7 @@
 // Tests for the DMO row parser in scripts/refresh-gilt-prices.js (no network).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseGiltRow, nextBusinessDay } from "./scripts/refresh-gilt-prices.js";
+import { parseGiltRow } from "./scripts/refresh-gilt-prices.js";
 
 test("cum-div row: clean and dirty read in column order", () => {
   const r = parseGiltRow(["3¾% Treasury Gilt 2027", 99.84, 100.462, "GB00BMBL1G81"]);
@@ -27,7 +27,7 @@ test("header and blank rows are skipped", () => {
 
 // ── Data check: npm run verify ───────────────────────────────────────────────
 import { verifyPrices } from "./scripts/verify-gilt-prices.js";
-import { settlementTerms } from "./src/giltMath.js";
+import { settlementTerms, dmoDirtySettlement } from "./src/giltMath.js";
 import { MASTER } from "./src/giltUniverse.js";
 
 function fileWithDirty(settlement, bump = {}) {
@@ -69,8 +69,34 @@ test("verify: a file without dirty prices is reported, not silently passed", () 
   assert.match(r.skipped, /no dirty prices/);
 });
 
-test("refresh: settlement is the next business day after asOf", () => {
+test("refresh: DMO dirty prices settle three business days after asOf", () => {
   const iso = d => d.toISOString().slice(0, 10);
-  assert.equal(iso(nextBusinessDay(new Date("2026-11-04T00:00:00Z"))), "2026-11-05");
-  assert.equal(iso(nextBusinessDay(new Date("2026-11-06T00:00:00Z"))), "2026-11-09");
+  assert.equal(iso(dmoDirtySettlement("2026-11-04")), "2026-11-09");   // Wed → Mon
+  assert.equal(iso(dmoDirtySettlement("2026-11-05")), "2026-11-10");   // Thu → Tue
+  assert.equal(iso(dmoDirtySettlement("2026-11-09")), "2026-11-12");   // Mon → Thu
+});
+
+// Real D10B rows (trade date, clean, dirty) from the 5 and 10 Nov 2026 files.
+// At T+1 these were out by 2–4 days of accrued interest, which failed every
+// refresh run from 5 Nov until the settlement date was corrected.
+test("verify: real DMO dirty prices match accrued at T+3, not T+1", () => {
+  const rows = [
+    ["2026-11-05", "TR32", 97.34, 99.1515],
+    ["2026-11-05", "TR28", 102.77, 105.3274],
+    ["2026-11-05", "TG61", 24.11, 24.1361],
+    ["2026-11-10", "TR32", 97.35, 99.1963],
+    ["2026-11-10", "T29K", 98.22, 98.1222],     // ex-div at 13 Nov settlement
+    ["2026-11-10", "TG41", 57.79, 57.8655],
+  ];
+  for (const asOf of ["2026-11-05", "2026-11-10"]) {
+    const prices = {}, dirty = {};
+    for (const [d, sym, c, dp] of rows) if (d === asOf) { prices[sym] = c; dirty[sym] = dp; }
+    const n = Object.keys(prices).length;
+    const ok = verifyPrices({ asOf, prices, dirty });            // settlement derived: T+3
+    assert.equal(ok.checked, n);
+    assert.deepEqual(ok.failures, []);
+    const t1 = new Date(asOf + "T00:00:00Z"); t1.setUTCDate(t1.getUTCDate() + 1);
+    const bad = verifyPrices({ asOf, settlement: t1.toISOString().slice(0, 10), prices, dirty });
+    assert.equal(bad.failures.length, n);
+  }
 });

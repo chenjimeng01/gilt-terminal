@@ -4,8 +4,8 @@
 // (report code D10B) and writes public/gilt-prices.json. Each entry records
 // the DMO clean (mid) reference price for that gilt on the trade date
 // (`prices`, kept for compatibility), the DMO dirty price (`dirty`), and the
-// settlement date those prices are for (`settlement`, next business day after
-// `asOf`). `npm run verify` checks dirty = clean + accrued at that settlement.
+// settlement date the dirty prices are for (`settlement`, three business days
+// after `asOf`). `npm run verify` checks dirty = clean + accrued at that date.
 //
 // Run by .github/workflows/refresh-gilt-prices.yml at 18:00 UTC Mon-Fri.
 // Requires the `xlsx` package (BIFF8 .xls parser); installed via npm in the
@@ -17,6 +17,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as XLSX from "xlsx";
+import { dmoDirtySettlement } from "../src/giltMath.js";
 
 // ── Config ────────────────────────────────────────────────────────────────
 
@@ -223,15 +224,6 @@ async function fetchDmoXls(d) {
   }
 }
 
-// DMO reference prices are for next-business-day settlement. Weekends only;
-// UK bank holidays are not modelled yet (same rule as the app).
-export function nextBusinessDay(d) {
-  const out = new Date(d);
-  do out.setUTCDate(out.getUTCDate() + 1);
-  while (out.getUTCDay() === 0 || out.getUTCDay() === 6);
-  return out;
-}
-
 // Plausible gilt price range per £100 nominal. Anything outside it (e.g. an
 // Excel date serial) is not a price column.
 const MIN_PX = 0, MAX_PX = 250;
@@ -387,7 +379,8 @@ async function main() {
 
   const out = {
     asOf: fmtIsoDate(chosenDate),
-    settlement: fmtIsoDate(nextBusinessDay(chosenDate)),
+    // Weekends only; UK bank holidays are not modelled yet (same as the app).
+    settlement: fmtIsoDate(dmoDirtySettlement(fmtIsoDate(chosenDate))),
     source: "UK DMO Daily Reference Prices (D10B, clean and dirty mid)",
     sourceUrl: chosenUrl,
     fetched: new Date().toISOString(),

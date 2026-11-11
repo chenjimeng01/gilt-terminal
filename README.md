@@ -32,14 +32,16 @@ UK Debt Management Office's published reference prices.
 2. **Daily refresh.** GitHub Actions runs `scripts/refresh-gilt-prices.js` at 18:00 UTC
    Mon-Fri. The script fetches the DMO's "Daily Reference Prices" CSV, matches each
    row against the gilts the terminal tracks, and rewrites `public/gilt-prices.json` with
-   clean prices (`prices`), DMO dirty prices (`dirty`) and their `settlement` date (T+1).
+   clean prices (`prices`), DMO dirty prices (`dirty`) and the `settlement` date the dirty
+   prices are for (three business days after `asOf`).
    `npm run verify` then checks every dirty price against clean + our accrued interest
    (±0.005); if it fails, nothing is committed.
 3. **Auto-redeploy.** When the workflow commits a changed JSON file, the host
    (Vercel / Netlify / Pages) detects the push and redeploys.
 4. **Client.** On each page load `GiltTerminal.jsx` does one `fetch('/gilt-prices.json')`,
-   prices every gilt for T+1 settlement after the file's `asOf` (using the DMO dirty
-   price when it is for that date), and shows a stale-data warning if the file is more
+   prices every gilt for T+1 settlement after the file's `asOf` (DMO clean price plus
+   our own accrued interest; the DMO dirty price is used only if it is for that same
+   date, which the T+3 DMO file normally is not), and shows a stale-data warning if the file is more
    than 4 days old.
 
 ## Local development
@@ -98,7 +100,8 @@ side never has to change.
 - **Accrued interest** is Actual/Actual from the coupon schedule. Within 7 business days
   of a coupon the gilt trades ex-dividend: the buyer forgoes that coupon and accrued
   interest is negative. Where the DMO dirty price is available for the settlement date,
-  it is used directly.
+  it is used directly — the DMO file's dirty prices are for T+3, so at the default T+1
+  they only serve as the daily data check.
 - **Yield to maturity** follows the DMO formula: cash flows are discounted in coupon
   periods (days to next coupon ÷ days in the period, then whole half-years) with
   semi-annual compounding, solved by bisection on [−50%, 100%] to 1e-10. If no yield in

@@ -276,7 +276,7 @@ function MethodologyNote({ taxRate, settlement }) {
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Settlement</strong> — accrued interest and yields are
           for settlement on {settlement.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })},
-          the next business day after the price date (DMO reference prices are for T+1 settlement).
+          the next business day after the price date (T+1), using the DMO clean reference price.
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Accrued interest</strong> — Actual/Actual day count
           (days elapsed ÷ actual days in coupon period), per UK gilt convention. Within 7 business
