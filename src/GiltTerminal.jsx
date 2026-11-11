@@ -3,14 +3,27 @@ import { priceSettlement } from "./giltMath.js";
 import { analyseGilts } from "./analyserModel.js";
 import LadderView from "./LadderView.jsx";
 import PriceEditor from "./PriceEditor.jsx";
+import BUILD_PRICE_FILE from "../public/gilt-prices.json";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const PRICES_URL_DEFAULT = "/gilt-prices.json";
-// Date of the fallback clean prices (MASTER px). Without live prices the
-// analyser prices everything at T+1 after this date, so accrued interest and
-// yields are consistent with the snapshot it is labelled with.
-const SNAPSHOT_AS_OF = "2026-11-11";
+// Fallback snapshot: the daily price file as it stood when this bundle was
+// built. The host rebuilds on every refresh commit, so the snapshot tracks the
+// latest DMO data without manual updates. It is used only when the runtime
+// fetch of the price file fails. Without live prices the analyser prices
+// everything at T+1 after SNAPSHOT_AS_OF, so accrued interest and yields are
+// consistent with the snapshot it is labelled with. MASTER px (dated
+// MASTER_PX_AS_OF) is the last resort for a gilt missing from the file.
+const MASTER_PX_AS_OF = "2026-11-11";
+const SNAPSHOT_PRICES = Object.fromEntries(
+  Object.entries(BUILD_PRICE_FILE?.prices ?? {})
+    .filter(([, px]) => typeof px === "number" && Number.isFinite(px) && px > 0));
+const SNAPSHOT_AS_OF =
+  Object.keys(SNAPSHOT_PRICES).length && /^\d{4}-\d{2}-\d{2}$/.test(BUILD_PRICE_FILE?.asOf ?? "")
+    ? BUILD_PRICE_FILE.asOf : MASTER_PX_AS_OF;
+const SNAPSHOT_LABEL = new Date(SNAPSHOT_AS_OF + "T00:00:00Z")
+  .toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const STALE_DAYS_WARN = 4;
 
 
@@ -229,7 +242,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
                 </tr>
                 {editing === g.sym && (
                   <PriceEditor gilt={g} colSpan={13} taxRate={taxRate}
-                    referenceClean={isLive ? liveOverrides[g.sym] ?? g.px : g.px}
+                    referenceClean={liveOverrides[g.sym] ?? g.px}
                     current={manual[g.sym] ?? null}
                     onApply={m => setManual(prev => ({ ...prev, [g.sym]: m }))}
                     onClear={() => setManual(prev => { const { [g.sym]: _, ...rest } = prev; return rest; })}
@@ -242,7 +255,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
         </table>
       </div>
       <div style={s.ts}>
-        <span>{isLive ? "⬤ Live · UK DMO daily reference prices" : "◯ Cached · snapshot 11 Nov 2026"}</span>
+        <span>{isLive ? "⬤ Live · UK DMO daily reference prices" : `◯ Cached · snapshot ${SNAPSHOT_LABEL}`}</span>
         <span>{now}</span>
       </div>
     </div>
@@ -308,7 +321,7 @@ export default function GiltTerminal() {
   const [isLive, setIsLive] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState(null);
-  const [updateStamp, setUpdateStamp] = useState("Prices: snapshot 11 Nov 2026");
+  const [updateStamp, setUpdateStamp] = useState(`Prices: snapshot ${SNAPSHOT_LABEL}`);
   const [asOf, setAsOf] = useState(null);
   const [liveDirty, setLiveDirty] = useState({});
   // One-off manual prices ({ [sym]: makeManualPrice result }): page memory
@@ -320,8 +333,10 @@ export default function GiltTerminal() {
 
   const settlement = useMemo(() => priceSettlement(isLive && asOf ? asOf : SNAPSHOT_AS_OF), [isLive, asOf]);
   const dirtyHere = isLive && dirtySettlement === settlement.toISOString().slice(0, 10) ? liveDirty : {};
+  // Clean prices in force: the fetched file, else the build-time snapshot.
+  const basePrices = isLive ? liveOverrides : SNAPSHOT_PRICES;
   const data = analyseGilts({
-    prices: isLive ? liveOverrides : {}, isLive, taxRate, settlement, liveDirty: dirtyHere, manual,
+    prices: basePrices, isLive, taxRate, settlement, liveDirty: dirtyHere, manual,
   });
   const manualSyms = Object.keys(manual);
   const filtered = applyFilters(data, { matFilter, couponFilter, sortBy });
@@ -386,10 +401,10 @@ export default function GiltTerminal() {
       setDirtySettlement(null);
       setIsLive(false);
       setAsOf(null);
-      setUpdateStamp("Snapshot 11 Nov 2026");
+      setUpdateStamp(`Snapshot ${SNAPSHOT_LABEL}`);
       setNotice({
         type: "warn",
-        msg: `Couldn't load the daily price file (${err.message || err}). Showing 11 Nov 2026 snapshot.`,
+        msg: `Couldn't load the daily price file (${err.message || err}). Showing ${SNAPSHOT_LABEL} snapshot.`,
       });
     }
     setRefreshing(false);
@@ -458,7 +473,7 @@ export default function GiltTerminal() {
         {/* Body */}
         {view === "ladder" ? (
           <LadderView taxRate={taxRate} setTaxRate={setTaxRate}
-            liveOverrides={liveOverrides} isLive={isLive} asOf={asOf}
+            liveOverrides={basePrices} isLive={isLive} asOf={asOf} snapshotLabel={SNAPSHOT_LABEL}
             liveDirty={liveDirty} dirtySettlement={dirtySettlement}
             manual={manual} setManual={setManual} />
         ) : (
@@ -504,7 +519,7 @@ export default function GiltTerminal() {
             <div style={{ fontSize: 12, color: "#5a5750", lineHeight: 1.75 }}>
               <div style={s.secLbl}>Data source</div>
               <strong style={{ color: "#1a1916" }}>Live:</strong> UK DMO daily reference prices<br />
-              <strong style={{ color: "#1a1916" }}>Fallback:</strong> snapshot 11 Nov 2026<br />
+              <strong style={{ color: "#1a1916" }}>Fallback:</strong> snapshot {SNAPSHOT_LABEL}<br />
               <span style={{ color: "#9a978f", fontSize: 11 }}>
                 Refreshed each weekday after LSE close by GitHub Action.
                 AI uses Actual/Actual day count. YTM uses exact coupon schedule.
@@ -539,7 +554,7 @@ export default function GiltTerminal() {
                 </div>
               </div>
               {filtered.length > 0
-                ? <GiltTable data={filtered} isLive={isLive} liveOverrides={liveOverrides}
+                ? <GiltTable data={filtered} isLive={isLive} liveOverrides={basePrices}
                     manual={manual} setManual={setManual} taxRate={taxRate} />
                 : <div style={{ padding: "3rem 2rem", textAlign: "center", color: "#9a978f" }}>No gilts match the current filters.</div>
               }
