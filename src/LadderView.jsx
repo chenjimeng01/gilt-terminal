@@ -157,7 +157,7 @@ function download(name, text, type) {
 }
 
 // ── Main view ─────────────────────────────────────────────────────────────────
-export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf, liveDirty = {}, dirtySettlement = null, manual = {}, setManual }) {
+export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf, snapshotLabel = "", liveDirty = {}, dirtySettlement = null, manual = {}, setManual }) {
   const [editing, setEditing] = useState(null);
   const saved = useMemo(readHash, []);
   const [rows, setRows] = useState(saved?.rows ?? defaultLiabilities());
@@ -212,7 +212,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
   const vsCash = t.cashAdvantage;
   const inflOn = t.inflation > 0;
   const nManual = priceInputs.manualSyms.length;
-  const priceStamp = (isLive && asOf ? `Prices as of ${asOf}` : "Prices: snapshot 11 Nov 2026 (fallback)") +
+  const priceStamp = (isLive && asOf ? `Prices as of ${asOf}` : `Prices: snapshot ${snapshotLabel} (fallback)`) +
     (nManual ? ` + ${nManual} live price${nManual > 1 ? "s" : ""} you entered` : "");
 
   const setRow = (i, patch) => setRows(rs => rs.map((r, k) => (k === i ? { ...r, ...patch } : r)));
@@ -459,7 +459,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                         </tr>
                         {editing === i && (
                           <PriceEditor gilt={r.gilt} colSpan={13} taxRate={account === "GIA" ? taxRate : 0}
-                            referenceClean={isLive ? liveOverrides[r.gilt.sym] ?? r.gilt.px : r.gilt.px}
+                            referenceClean={liveOverrides[r.gilt.sym] ?? r.gilt.px}
                             current={manual[r.gilt.sym] ?? null}
                             note={`The ladder applies your clean price at its settlement date (${isoDay(result.settlement)}), so its dirty price and IRR use accrued interest at that date. Changing the price can change which gilt a rung picks.`}
                             onApply={m => setManual(prev => ({ ...prev, [r.gilt.sym]: m }))}

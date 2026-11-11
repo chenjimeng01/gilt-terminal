@@ -43,6 +43,10 @@ UK Debt Management Office's published reference prices.
    our own accrued interest; the DMO dirty price is used only if it is for that same
    date, which the T+3 DMO file normally is not), and shows a stale-data warning if the file is more
    than 4 days old.
+5. **Fallback.** The same price file is also bundled into the app at build time. If the
+   page-load fetch fails, the app shows that bundled copy as a dated snapshot. Because the
+   host rebuilds on every refresh commit, the snapshot follows the latest DMO data with
+   no manual updates.
 
 ## Local development
 
