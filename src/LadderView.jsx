@@ -212,7 +212,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
   const vsCash = t.cashAdvantage;
   const inflOn = t.inflation > 0;
   const nManual = priceInputs.manualSyms.length;
-  const priceStamp = (isLive && asOf ? `Prices as of ${asOf}` : "Prices: snapshot 31 Mar 2026 (fallback)") +
+  const priceStamp = (isLive && asOf ? `Prices as of ${asOf}` : "Prices: snapshot 11 Nov 2026 (fallback)") +
     (nManual ? ` + ${nManual} live price${nManual > 1 ? "s" : ""} you entered` : "");
 
   const setRow = (i, patch) => setRows(rs => rs.map((r, k) => (k === i ? { ...r, ...patch } : r)));

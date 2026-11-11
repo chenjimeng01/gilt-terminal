@@ -10,7 +10,7 @@ const PRICES_URL_DEFAULT = "/gilt-prices.json";
 // Date of the fallback clean prices (MASTER px). Without live prices the
 // analyser prices everything at T+1 after this date, so accrued interest and
 // yields are consistent with the snapshot it is labelled with.
-const SNAPSHOT_AS_OF = "2026-03-31";
+const SNAPSHOT_AS_OF = "2026-11-11";
 const STALE_DAYS_WARN = 4;
 
 
@@ -242,7 +242,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
         </table>
       </div>
       <div style={s.ts}>
-        <span>{isLive ? "⬤ Live · UK DMO daily reference prices" : "◯ Cached · snapshot 31 Mar 2026"}</span>
+        <span>{isLive ? "⬤ Live · UK DMO daily reference prices" : "◯ Cached · snapshot 11 Nov 2026"}</span>
         <span>{now}</span>
       </div>
     </div>
@@ -308,7 +308,7 @@ export default function GiltTerminal() {
   const [isLive, setIsLive] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState(null);
-  const [updateStamp, setUpdateStamp] = useState("Prices: snapshot 31 Mar 2026");
+  const [updateStamp, setUpdateStamp] = useState("Prices: snapshot 11 Nov 2026");
   const [asOf, setAsOf] = useState(null);
   const [liveDirty, setLiveDirty] = useState({});
   // One-off manual prices ({ [sym]: makeManualPrice result }): page memory
@@ -386,10 +386,10 @@ export default function GiltTerminal() {
       setDirtySettlement(null);
       setIsLive(false);
       setAsOf(null);
-      setUpdateStamp("Snapshot 31 Mar 2026");
+      setUpdateStamp("Snapshot 11 Nov 2026");
       setNotice({
         type: "warn",
-        msg: `Couldn't load the daily price file (${err.message || err}). Showing 31 Mar 2026 snapshot.`,
+        msg: `Couldn't load the daily price file (${err.message || err}). Showing 11 Nov 2026 snapshot.`,
       });
     }
     setRefreshing(false);
@@ -504,7 +504,7 @@ export default function GiltTerminal() {
             <div style={{ fontSize: 12, color: "#5a5750", lineHeight: 1.75 }}>
               <div style={s.secLbl}>Data source</div>
               <strong style={{ color: "#1a1916" }}>Live:</strong> UK DMO daily reference prices<br />
-              <strong style={{ color: "#1a1916" }}>Fallback:</strong> snapshot 31 Mar 2026<br />
+              <strong style={{ color: "#1a1916" }}>Fallback:</strong> snapshot 11 Nov 2026<br />
               <span style={{ color: "#9a978f", fontSize: 11 }}>
                 Refreshed each weekday after LSE close by GitHub Action.
                 AI uses Actual/Actual day count. YTM uses exact coupon schedule.
