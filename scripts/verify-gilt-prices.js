@@ -1,7 +1,8 @@
 // Data check for public/gilt-prices.json (npm run verify).
 //
-// The DMO publishes both clean and dirty reference prices for next-business-
-// day settlement. For every gilt with a dirty price, recompute
+// The DMO publishes clean and dirty reference prices; the dirty prices are for
+// settlement three business days after the trade date (the file's
+// `settlement`). For every gilt with a dirty price, recompute
 //   clean + accrued interest at `settlement`   (giltMath.settlementTerms,
 //                                               ex-dividend aware)
 // and fail if it differs from the DMO dirty price by more than TOLERANCE.
@@ -14,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { settlementTerms, priceSettlement } from "../src/giltMath.js";
+import { settlementTerms, dmoDirtySettlement } from "../src/giltMath.js";
 import { MASTER } from "../src/giltUniverse.js";
 
 export const TOLERANCE = 0.005;
@@ -25,7 +26,7 @@ export const TOLERANCE = 0.005;
  */
 export function verifyPrices(json) {
   const dirty = json.dirty && typeof json.dirty === "object" ? json.dirty : null;
-  const settlementStr = json.settlement ?? (json.asOf ? priceSettlement(json.asOf).toISOString().slice(0, 10) : null);
+  const settlementStr = json.settlement ?? (json.asOf ? dmoDirtySettlement(json.asOf).toISOString().slice(0, 10) : null);
   const out = { settlement: settlementStr, checked: 0, failures: [], missing: [] };
   if (!dirty || !Object.keys(dirty).length) {
     out.skipped = "no dirty prices in file (written before the refresh script recorded them)";
