@@ -57,6 +57,7 @@ const s = {
   hdrRight: { display: "flex", alignItems: "center", gap: 10 },
   editBtn: { border: "1px solid #e0deda", background: "#fff", color: "#9a978f", borderRadius: 4, fontSize: 11, lineHeight: 1, padding: "3px 5px", cursor: "pointer" },
   manualBadge: { fontSize: 9.5, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", padding: "1px 6px", borderRadius: 10, background: "#fef3e2", color: "#92600a", cursor: "help" },
+  infoBar: { padding: "7px 1.5rem", background: "#f2f1ee", borderBottom: "1px solid #e0deda", color: "#5a5750", fontSize: 12, lineHeight: 1.55 },
   manualBar: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "7px 1.5rem", background: "#fef3e2", borderBottom: "1px solid rgba(146,96,10,.2)", color: "#92600a", fontSize: 12.5 },
   livePill: { display: "flex", alignItems: "center", gap: 5, background: "#e8f5ef", color: "#1a6b4a", padding: "4px 10px", borderRadius: 20, fontSize: 11, fontWeight: 500 },
   stamp: { fontSize: 11, color: "#9a978f" },
@@ -123,7 +124,7 @@ function SummaryCards({ data, taxRate }) {
         <div style={s.cardSub}>conventional gilts</div>
       </div>
       <div style={s.card}>
-        <div style={s.cardLbl}>Best after-tax YTM</div>
+        <div style={s.cardLbl}>Highest after-tax YTM</div>
         <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{best ? best.at.toFixed(3) + "%" : "—"}</div>
         <div style={{ ...s.cardSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{best ? best.name.replace(" Treasury", "").replace(" Stock", "").trim() : "—"}</div>
       </div>
@@ -174,7 +175,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
                   h === "Deposit Equiv. ▲"
                     ? "Gross yield a fully-taxable deposit would need to match this gilt's after-tax return: after-tax YTM ÷ (1 − tax rate)."
                     : h === "Gilt"
-                    ? "HL and AJ Bell links open the gilt at that broker, where you can see their price and deal yourself. Gilt Terminal isn't affiliated with either and places no trades."
+                    ? "HL and AJ Bell links open the gilt at that broker. Gilt Terminal isn't affiliated with either, receives nothing from them and places no trades; the links are not a recommendation to deal."
                     : h === "Clean £"
                     ? "Click ✎ to enter a live price for a one-off check (not saved)."
                     : h.endsWith("(s.a.)")
@@ -194,8 +195,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
               </tr>
             )}
             {data.map((g, i) => {
-              const isTop = i === 0;
-              const rowBg = isTop ? "#e8f5ef" : i % 2 === 0 ? "#fff" : "#fafaf9";
+              const rowBg = i % 2 === 0 ? "#fff" : "#fafaf9";
               const matLbl = new Date(g.mat).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
               const pct = g.at != null ? Math.max(0, (g.at / maxAt) * 100).toFixed(1) : "0";
               const dPxCls = g.dPx > 0.005 ? "#1a6b4a" : g.dPx < -0.005 ? "#b91c1c" : "#9a978f";
@@ -208,7 +208,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
               return (
                 <Fragment key={g.sym}>
                 <tr>
-                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: isTop ? "#1a6b4a" : "#9a978f", fontWeight: isTop ? 500 : 400 }}>{i + 1}</span>)}
+                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: "#9a978f" }}>{i + 1}</span>)}
                   {td(<>
                     <span style={{ fontSize: 13, color: "#1a1916", maxWidth: 195, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{g.name}</span>
                     <span style={{ display: "block", marginTop: 3 }}><BrokerLinks gilt={g} /></span>
@@ -466,6 +466,14 @@ export default function GiltTerminal() {
           </div>
         </header>
 
+        <div style={s.infoBar} role="note">
+          <strong style={{ fontWeight: 500, color: "#1a1916" }}>Information only — not advice or a personal recommendation.</strong>{" "}
+          For investment professionals. A personal project: not operated by or on behalf of any FCA-authorised firm, and not a
+          regulated service. Figures are calculations from published prices, which may be stale or wrong — check before relying
+          on them. Tax treatment depends on individual circumstances and may change. No affiliation with Hargreaves Lansdown or
+          AJ Bell; links are for convenience only.
+        </div>
+
         {manualSyms.length > 0 && (
           <div style={s.manualBar}>
             <span>
@@ -534,7 +542,7 @@ export default function GiltTerminal() {
             </div>
 
             <div style={s.sbFoot}>
-              Not financial advice. Verify prices before dealing.<br />
+              Information only — not advice. Verify prices before dealing.<br />
               <a href="https://giltsyield.com" target="_blank" rel="noreferrer" style={{ color: "#2563a8" }}>giltsyield.com</a>
               {" · "}
               <a href="https://www.dmo.gov.uk" target="_blank" rel="noreferrer" style={{ color: "#2563a8" }}>dmo.gov.uk</a>
@@ -551,7 +559,7 @@ export default function GiltTerminal() {
 
             <div style={s.panel}>
               <div style={s.panelHdr}>
-                <span style={s.panelTtl}>Ranked by after-tax yield to maturity</span>
+                <span style={s.panelTtl}>Sorted by after-tax yield to maturity</span>
                 <div style={s.pills}>
                   {TENOR_PILLS.map(({ val, label }) => (
                     <button key={val} style={matFilter === val ? s.pillOn : s.pill}

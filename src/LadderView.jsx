@@ -225,7 +225,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     setCopied(label);
     setTimeout(() => setCopied(null), 2000);
   });
-  const dealingTicket = () => filled.filter(r => r.nominal > 0).map(r => `${r.gilt.sym}${r.gilt.isin ? ` (ISIN ${r.gilt.isin})` : ""} — nominal ${gbp(r.nominal)} — buy`).join("\n");
+  const dealingTicket = () => filled.filter(r => r.nominal > 0).map(r => `${r.gilt.sym}${r.gilt.isin ? ` (ISIN ${r.gilt.isin})` : ""} — nominal ${gbp(r.nominal)}`).join("\n");
 
   const empty = rows.filter(r => Number(r.amount) > 0).length === 0;
 
@@ -261,9 +261,9 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
         <div>
           <div style={s.secLbl}>Ladder settings</div>
           <div style={{ marginBottom: "0.7rem" }}>
-            <div style={{ ...s.fieldRow, marginBottom: 3 }}><span>Selection preference</span></div>
+            <div style={{ ...s.fieldRow, marginBottom: 3 }}><span title="The rule you choose for which gilt the calculator shows when several mature in the window. It is a mechanical filter, not a view on which gilt is suitable.">Selection rule (your choice) ▲</span></div>
             <select style={s.selectEl} value={pref} onChange={e => setPref(e.target.value)}>
-              <option value="lowCoupon">Lowest coupon (min tax drag)</option>
+              <option value="lowCoupon">Lowest coupon</option>
               <option value="netYield">Highest net redemption yield</option>
             </select>
           </div>
@@ -309,7 +309,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
         </div>
 
         <div style={s.sbFoot}>
-          Illustrative only — not investment advice. Prices indicative and may be stale.
+          Illustrative calculation only — not advice or a recommendation. Prices indicative and may be stale.
           Gilt income is taxable; capital gains on conventional gilts are CGT-exempt for UK individuals.
         </div>
       </aside>
@@ -319,8 +319,9 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
         {empty && (
           <div style={s.noticeInfo}>
             <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>ℹ</span>
-            <span>Enter your future spending needs below (or use quick-fill) and the ladder builder
-              picks a gilt maturing just before each one, sized so redemption at par meets the bill — coupons along the way are surplus.</span>
+            <span>Enter future cash needs below (or use quick-fill). For each one the calculator shows the gilt that matches the
+              selection rule and maturity window you set, sized so redemption at par covers the amount, and the resulting cash flows.
+              It is an illustration of the arithmetic, not a recommendation to buy any gilt.</span>
           </div>
         )}
         {result.warnings.map((w, i) => (
@@ -377,8 +378,8 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                 <div style={s.cardSub}>{account === "GIA" ? `after ${Math.round(taxRate * 100)}% on coupons` : "gross — " + account}</div>
               </div>
               <div style={s.card}>
-                <div style={s.cardLbl} title="Every after-tax coupon and redemption the ladder pays, valued at the cash rate (as if put on deposit until needed), minus what the ladder costs. Positive exactly when the ladder's IRR beats the cash rate.">vs cash at {Number(cashRate).toFixed(1)}% net ▲</div>
-                <div style={{ ...s.cardVal, color: vsCash >= 0 ? "#1a6b4a" : "#b91c1c" }}>{vsCash >= 0 ? gbp(vsCash) + " better" : gbp(-vsCash) + " worse"}</div>
+                <div style={s.cardLbl} title="Every after-tax coupon and redemption the ladder pays, valued at the cash rate (as if put on deposit until needed), minus what the ladder costs. Positive when the ladder's IRR is above the cash rate you entered. A calculation on your inputs, not a comparison of suitability.">Ladder minus cash at {Number(cashRate).toFixed(1)}% net ▲</div>
+                <div style={{ ...s.cardVal, color: "#1a1916" }}>{vsCash >= 0 ? "+" + gbp(vsCash) : "−" + gbp(-vsCash)}</div>
                 <div style={s.cardSub} title={`Ladder costs ${gbp(t.cost)}; its inflows are worth ${gbp(t.inflowsPV)} at ${Number(cashRate).toFixed(1)}%, of which ${gbp(t.inflowsPV - t.cashAlternative)} is surplus over the liabilities.`}>
                   cash needs {gbp(t.cashAlternative)}; ladder {gbp(t.ladderNetCost)} net of surplus
                 </div>
@@ -397,7 +398,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                 <div style={{ display: "flex", gap: 6 }}>
                   <button style={s.btn} onClick={() => download("gilt-ladder.csv", toCSV(result), "text/csv")}>⇩ CSV</button>
                   <button style={s.btn} onClick={() => copy("ticket", dealingTicket())}
-                    title="Ticker, ISIN and nominal per line">{copied === "ticket" ? "✓ Copied" : "Copy dealing ticket"}</button>
+                    title="Ticker, ISIN and nominal per line, for your own records">{copied === "ticket" ? "✓ Copied" : "Copy summary"}</button>
                   <button style={s.btn} onClick={() => copy("link", window.location.href)}>{copied === "link" ? "✓ Copied" : "Share link"}</button>
                 </div>
               </div>
@@ -463,7 +464,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                           <PriceEditor gilt={r.gilt} colSpan={13} taxRate={account === "GIA" ? taxRate : 0}
                             referenceClean={liveOverrides[r.gilt.sym] ?? r.gilt.px}
                             current={manual[r.gilt.sym] ?? null}
-                            note={`The ladder applies your clean price at its settlement date (${isoDay(result.settlement)}), so its dirty price and IRR use accrued interest at that date. Changing the price can change which gilt a rung picks.`}
+                            note={`The ladder applies your clean price at its settlement date (${isoDay(result.settlement)}), so its dirty price and IRR use accrued interest at that date. Changing the price can change which gilt a rung shows.`}
                             onApply={m => setManual(prev => ({ ...prev, [r.gilt.sym]: m }))}
                             onClear={() => setManual(prev => { const { [r.gilt.sym]: _, ...rest } = prev; return rest; })}
                             onClose={() => setEditing(null)} />

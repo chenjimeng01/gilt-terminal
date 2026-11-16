@@ -95,6 +95,22 @@ for one of the alternatives noted at the bottom of that file (Yahoo Finance, BoE
 yield curve, Tradeweb PDFs). The output JSON shape stays the same, so the React
 side never has to change.
 
+## Audience and status
+
+Gilt Terminal is information only: a calculator, not advice or a personal recommendation.
+It is directed only at financial advisers and professional and institutional investors.
+
+- **Entry gate** (`src/AccessGate.jsx`, rules in `src/accessGate.js`): before anything loads,
+  visitors self-certify as Financial Adviser, Professional Investor, Institutional Investor
+  or Other, and tick a confirmation. "Other" is refused. The certification lasts for the
+  browser session. It is self-certification in the browser, not an access control: it cannot
+  verify the answer, and the built files remain publicly fetchable.
+- **Notice bar** on every view: information only, personal project, not a regulated service,
+  prices may be stale, tax depends on circumstances, no affiliation with the linked brokers.
+- **Wording** is kept neutral: values are "highest" or signed differences, never "best" or
+  "better"; the ladder "shows the gilt matching the rule you set", it does not recommend.
+- Search engines are asked not to index the site (`noindex`).
+
 ## Notes
 
 - **Dates** are UTC throughout. Coupon dates are maturity − 6k months, clamped to month
