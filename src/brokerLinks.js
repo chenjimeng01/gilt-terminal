@@ -62,7 +62,7 @@ export function brokerLinks(gilt) {
         ? `${AJBELL_DEAL_URL}?marketCode=SEDOL:${sedol}&instruction=B`
         : AJBELL_GILTS_URL,
       title: listed
-        ? `Buy ${gilt.name} on AJ Bell — opens its dealing screen (login needed). ISIN ${gilt.isin}.`
+        ? `${gilt.name} on AJ Bell — opens its dealing screen (login needed). ISIN ${gilt.isin}.`
         : `${gilt.name} wasn't on AJ Bell's online gilt list when checked (${LINKS_CHECKED}) — opens the list. ISIN ${gilt.isin}.`,
     },
   };
