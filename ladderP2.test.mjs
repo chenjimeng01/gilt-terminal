@@ -137,3 +137,41 @@ test("universe has no index-linked gilts, and the guard would catch one", () => 
   assert.ok(isIndexLinked({ name: "2½% Treasury I/L 2032" }));
   assert.ok(!isIndexLinked({ name: "4¼% Treasury Gilt 2034" }));
 });
+
+// ── Candidates per rung, and the user's own choice ──────────────────────────
+test("each rung lists every gilt in its window, in maturity order (not ranked)", () => {
+  const out = buildLadder(EXAMPLE);
+  const r = out.rungs[0];                                   // Jun 2027, 12-month window
+  const want = MASTER
+    .filter(g => D(g.mat) >= D("2026-06-01") && D(g.mat) <= D("2027-06-01") && D(g.mat) > D("2026-11-06"))
+    .sort((a, b) => D(a.mat) - D(b.mat) || a.c - b.c).map(g => g.sym);
+  assert.deepEqual(r.candidates.map(c => c.gilt.sym), want);
+  assert.ok(want.length >= 2);
+  assert.equal(r.candidates.filter(c => c.selected).length, 1);
+  assert.equal(r.candidates.find(c => c.selected).gilt.sym, r.gilt.sym);
+  assert.equal(r.selectedBy, "rule");
+  for (const c of r.candidates) {
+    assert.ok(Number.isFinite(c.cleanPx) && Number.isFinite(c.dirtyPx));
+    assert.ok(c.atYTM === null || Number.isFinite(c.atYTM));
+  }
+});
+
+test("the user's choice for a rung overrides the rule, and only for that rung", () => {
+  const base = buildLadder(EXAMPLE);
+  const other = base.rungs[0].candidates.find(c => !c.selected).gilt.sym;
+  const out = buildLadder({ ...EXAMPLE, choices: { "2027-06-01": other } });
+  assert.equal(out.rungs[0].gilt.sym, other);
+  assert.equal(out.rungs[0].selectedBy, "user");
+  assert.deepEqual(out.rungs.slice(1).map(r => r.gilt.sym), base.rungs.slice(1).map(r => r.gilt.sym));
+  assert.ok(out.rungs.slice(1).every(r => r.selectedBy === "rule"));
+  // the chosen gilt is priced like any other: cost = nominal × dirty / 100
+  const c = out.rungs[0].candidates.find(x => x.selected);
+  near(out.rungs[0].cost, out.rungs[0].nominal * c.dirtyPx / 100, 1e-6);
+});
+
+test("a choice that is no longer in the window falls back to the rule, with a warning", () => {
+  const out = buildLadder({ ...EXAMPLE, choices: { "2027-06-01": "TR73" } });
+  assert.equal(out.rungs[0].gilt.sym, buildLadder(EXAMPLE).rungs[0].gilt.sym);
+  assert.equal(out.rungs[0].selectedBy, "rule");
+  assert.ok(out.warnings.some(w => /TR73/.test(w)), out.warnings.join("; "));
+});

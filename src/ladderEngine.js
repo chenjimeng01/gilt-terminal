@@ -95,6 +95,9 @@ export function priceGilt(gilt, cleanPx, settlement, liveDirty = null) {
  *                  'couponOffset' size from the longest rung back, netting off
  *                                 coupons (and early redemptions) carried to
  *                                 each liability at cashNetRate
+ *   choices:       { 'YYYY-MM-DD' (liability date): sym } the user's own choice
+ *                  of gilt for a rung, overriding the selection rule. Ignored
+ *                  (with a warning) if that gilt is not in the rung's window.
  *   dirtyPrices:   { [sym]: dirtyPx } live DMO dirty prices (optional), used
  *                  only when dirtySettlement equals the ladder's settlement
  *   dirtySettlement: 'YYYY-MM-DD' the dirty prices are for
@@ -117,6 +120,7 @@ export function buildLadder(opts) {
     inflation = 0,
     sizing = "simple",
     ais = true,
+    choices = {},
     dirtyPrices = {},
     dirtySettlement = null,
   } = opts;
@@ -146,7 +150,7 @@ export function buildLadder(opts) {
   }
 
   // P2-1: amounts are in today's money; grow each to its date.
-  const ctx = { preference, windowMonths, settlement, prices, tEff, ais, dirtyFor, cashNetRate };
+  const ctx = { preference, windowMonths, settlement, prices, tEff, ais, dirtyFor, cashNetRate, choices };
   const selections = rows
     .filter(l => l.date > settlement)
     .sort((a, b) => a.date - b.date)
@@ -194,6 +198,11 @@ export function buildLadder(opts) {
   }
 
   const unsolved = [...new Set(rungs.flatMap(r => r.unsolvedCandidates || []))];
+  for (const r of rungs) {
+    if (r.staleChoice) {
+      warnings.push(`${r.staleChoice} is not in the maturity window for ${r.liabilityDate.toISOString().slice(0, 7)} — using the selection rule for that rung instead.`);
+    }
+  }
   if (unsolved.length) {
     warnings.push(`No yield between −50% and 100% reprices ${unsolved.join(", ")} — ranked last; check the price.`);
   }
@@ -308,10 +317,28 @@ function selectRung(liab, universe, ctx) {
       ? (b.atYTM - a.atYTM) || (a.g.c - b.g.c)
       : (a.g.c - b.g.c) || (b.atYTM - a.atYTM)
   );
-  const { g, cleanPx, p, atYTM } = scored[0];
+  // The user's own choice for this rung, if it is one of the candidates;
+  // otherwise the first gilt under the selection rule they set.
+  const wanted = ctx.choices?.[liab.date.toISOString().slice(0, 10)];
+  const byUser = wanted ? scored.find(x => x.g.sym === wanted) : null;
+  const { g, cleanPx, p, atYTM } = byUser ?? scored[0];
+
+  // Every gilt in the window, in maturity order (then coupon) — a neutral
+  // listing, deliberately not ranked.
+  const listed = [...scored]
+    .sort((a, b) => (toDate(a.g.mat) - toDate(b.g.mat)) || (a.g.c - b.g.c))
+    .map(x => ({
+      gilt: x.g, cleanPx: x.cleanPx, dirtyPx: x.p.dirtyPx, exDiv: x.p.exDiv,
+      atYTM: Number.isFinite(x.atYTM) ? x.atYTM : null,
+      selected: x.g.sym === g.sym,
+    }));
+
   return {
     ...base, unsolvedCandidates, unfillable: false,
     gilt: g, cleanPx, p, atYTM: Number.isFinite(atYTM) ? atYTM : null,
+    candidates: listed,
+    selectedBy: byUser ? "user" : "rule",
+    staleChoice: wanted && !byUser ? wanted : null,
   };
 }
 
