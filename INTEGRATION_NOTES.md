@@ -29,7 +29,7 @@ diverges from the spec.
 ## Mismatches with the spec & resolutions
 
 1. **No ISIN anywhere in the data layer.** Outputs (§4.1 table, §4.4 dealing ticket) use the
-   LSE EPIC (`sym`, e.g. `TN34`) instead, labelled as such. ISINs were *not* invented.
+   LSE EPIC (`sym`, e.g. `TS34`) instead, labelled as such. ISINs were *not* invented.
    *Smallest proposed extension:* add an `isin` field to `MASTER` rows (one-off manual lookup
    against the DMO gilts-in-issue list); engine and UI already pass the whole gilt row through,
    so populating it lights up ISIN display with no further code change.

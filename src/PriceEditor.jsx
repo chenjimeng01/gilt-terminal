@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { makeManualPrice } from "./manualPrices.js";
 import { solveYTM } from "./giltMath.js";
+import BrokerLinks from "./BrokerLinks.jsx";
 
 const mono = { fontFamily: "DM Mono, monospace" };
 const btn = {
@@ -64,6 +65,9 @@ export default function PriceEditor({ gilt, referenceClean, current, taxRate, co
           <button style={m?.ok ? btnPrimary : { ...btnPrimary, opacity: 0.4, cursor: "default" }} disabled={!m?.ok} onClick={apply}>Apply</button>
           {current && <button style={btn} onClick={() => { onClear(); onClose(); }}>Back to {referenceClean != null ? "file" : "snapshot"} price</button>}
           <button style={btn} onClick={onClose}>Cancel</button>
+          <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, color: "#9a978f" }}>
+            Check the price at <BrokerLinks gilt={gilt} />
+          </span>
         </div>
 
         <div style={{ marginTop: 7, fontSize: 11.5, lineHeight: 1.7, color: "#5a5750" }}>

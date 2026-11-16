@@ -276,7 +276,7 @@ function dmoDirty(c, matStr, settle, y) {
 
 test("solveYTM gross yield inverts the DMO price formula", () => {
   const cases = [
-    ["TS27", D("2026-11-06")], ["TE28", D("2026-11-06")], ["TN34", D("2026-11-06")],
+    ["TS27", D("2026-11-06")], ["TE28", D("2026-11-06")], ["TS34", D("2026-11-06")],
     ["TR73", D("2026-11-06")], ["T29K", EXDIV], ["T29K", CUMDIV], ["TS28", D("2027-05-31")],
   ];
   for (const [s, settle] of cases) {
