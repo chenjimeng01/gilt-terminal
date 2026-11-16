@@ -49,3 +49,16 @@ test("a gilt without an ISIN gets no links rather than a broken one", () => {
   assert.equal(brokerLinks({ name: "x", sym: "X" }), null);
   assert.equal(brokerLinks({ name: "x", sym: "X", isin: "GB00BQC82C91" }), null);
 });
+
+// Tickers are the keys of the price file: a renamed ticker must be renamed
+// in giltUniverse.js, the refresh script's list and the price file together.
+import fs from "node:fs";
+test("every unmatured gilt has a price under its ticker in the price file", () => {
+  const file = JSON.parse(fs.readFileSync(new URL("./public/gilt-prices.json", import.meta.url)));
+  const asOf = new Date(file.asOf + "T00:00:00Z");
+  const missing = MASTER.filter(g => new Date(g.mat) > asOf && !(g.sym in file.prices)).map(g => g.sym);
+  assert.deepEqual(missing, []);
+  const refresh = fs.readFileSync(new URL("./scripts/refresh-gilt-prices.js", import.meta.url), "utf8");
+  for (const g of MASTER) assert.ok(refresh.includes(`sym: "${g.sym}"`), `${g.sym} missing from the refresh script's list`);
+  assert.equal(MASTER.find(g => g.isin === "GB00BQC82C90").sym, "TS34");
+});

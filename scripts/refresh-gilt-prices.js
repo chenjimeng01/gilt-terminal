@@ -48,7 +48,7 @@ const MIN_FILE_BYTES = 30000;
 // (% per year) and `mat` is the maturity date (YYYY-MM-DD). We match each
 // gilt by (coupon, maturity-year) against the DMO gilt-name string.
 const GILTS = [
-  { sym: "TN34", c: 4.25,  mat: "2034-07-31" },
+  { sym: "TS34", c: 4.25,  mat: "2034-07-31" },
   { sym: "TG40", c: 4.375, mat: "2040-01-31" },
   { sym: "TG47", c: 1.5,   mat: "2047-07-22" },
   { sym: "TG46", c: 0.875, mat: "2046-01-31" },

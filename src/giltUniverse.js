@@ -5,7 +5,7 @@
 // (matched on coupon and maturity date) on 2026-11-16; broker links are built
 // from it (src/brokerLinks.js). The two gilts that matured in 2026 have none.
 export const MASTER = [
-  {name:"4¼% Treasury Gilt 2034",   c:4.25,  mat:"2034-07-31",px:94.86, ai:1.201,gy:5.062,sym:"TN34",isin:"GB00BQC82C90"},
+  {name:"4¼% Treasury Gilt 2034",   c:4.25,  mat:"2034-07-31",px:94.86, ai:1.201,gy:5.062,sym:"TS34",isin:"GB00BQC82C90"},
   {name:"4 3/8% Treasury Gilt 2040",c:4.375, mat:"2040-01-31",px:90.10, ai:1.236,gy:5.434,sym:"TG40",isin:"GB00BQC82D08"},
   {name:"1½% Treasury Gilt 2047",   c:1.5,   mat:"2047-07-22",px:49.66, ai:0.461,gy:5.660,sym:"TG47",isin:"GB00BDCHBW80"},
   {name:"0 7/8% Treasury Gilt 2046",c:0.875, mat:"2046-01-31",px:44.53, ai:0.247,gy:5.639,sym:"TG46",isin:"GB00BNNGP775"},
