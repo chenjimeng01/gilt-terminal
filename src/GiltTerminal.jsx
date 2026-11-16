@@ -3,6 +3,7 @@ import { priceSettlement } from "./giltMath.js";
 import { analyseGilts } from "./analyserModel.js";
 import LadderView from "./LadderView.jsx";
 import PriceEditor from "./PriceEditor.jsx";
+import BrokerLinks from "./BrokerLinks.jsx";
 import BUILD_PRICE_FILE from "../public/gilt-prices.json";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -172,6 +173,8 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
                 <th key={h} style={right ? s.thR : s.th} title={
                   h === "Deposit Equiv. ▲"
                     ? "Gross yield a fully-taxable deposit would need to match this gilt's after-tax return: after-tax YTM ÷ (1 − tax rate)."
+                    : h === "Gilt"
+                    ? "HL and AJ Bell links open the gilt at that broker, where you can see their price and deal yourself. Gilt Terminal isn't affiliated with either and places no trades."
                     : h === "Clean £"
                     ? "Click ✎ to enter a live price for a one-off check (not saved)."
                     : h.endsWith("(s.a.)")
@@ -206,7 +209,10 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
                 <Fragment key={g.sym}>
                 <tr>
                   {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: isTop ? "#1a6b4a" : "#9a978f", fontWeight: isTop ? 500 : 400 }}>{i + 1}</span>)}
-                  {td(<span style={{ fontSize: 13, color: "#1a1916", maxWidth: 195, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{g.name}</span>)}
+                  {td(<>
+                    <span style={{ fontSize: 13, color: "#1a1916", maxWidth: 195, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{g.name}</span>
+                    <span style={{ display: "block", marginTop: 3 }}><BrokerLinks gilt={g} /></span>
+                  </>)}
                   {td(<span style={{ fontFamily: "DM Mono, monospace", color: "#9a978f" }}>{g.c.toFixed(3)}%</span>, true)}
                   {td(<span style={{ color: "#9a978f" }}>{matLbl}</span>, true)}
                   {td(<span style={{ color: "#9a978f", fontSize: 12 }}>{g.yrs.toFixed(1)}y</span>, true)}

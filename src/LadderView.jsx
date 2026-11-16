@@ -3,6 +3,7 @@ import { MASTER } from "./giltUniverse.js";
 import { buildLadder, quickFill, addBusinessDays, toDate } from "./ladderEngine.js";
 import { ladderPriceInputs } from "./manualPrices.js";
 import PriceEditor from "./PriceEditor.jsx";
+import BrokerLinks from "./BrokerLinks.jsx";
 
 const MAX_RUNGS = 20;
 
@@ -224,7 +225,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     setCopied(label);
     setTimeout(() => setCopied(null), 2000);
   });
-  const dealingTicket = () => filled.filter(r => r.nominal > 0).map(r => `${r.gilt.sym} — nominal ${gbp(r.nominal)} — buy`).join("\n");
+  const dealingTicket = () => filled.filter(r => r.nominal > 0).map(r => `${r.gilt.sym}${r.gilt.isin ? ` (ISIN ${r.gilt.isin})` : ""} — nominal ${gbp(r.nominal)} — buy`).join("\n");
 
   const empty = rows.filter(r => Number(r.amount) > 0).length === 0;
 
@@ -396,7 +397,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                 <div style={{ display: "flex", gap: 6 }}>
                   <button style={s.btn} onClick={() => download("gilt-ladder.csv", toCSV(result), "text/csv")}>⇩ CSV</button>
                   <button style={s.btn} onClick={() => copy("ticket", dealingTicket())}
-                    title="EPIC ticker per line (ISINs not in the data layer)">{copied === "ticket" ? "✓ Copied" : "Copy dealing ticket"}</button>
+                    title="Ticker, ISIN and nominal per line">{copied === "ticket" ? "✓ Copied" : "Copy dealing ticket"}</button>
                   <button style={s.btn} onClick={() => copy("link", window.location.href)}>{copied === "link" ? "✓ Copied" : "Share link"}</button>
                 </div>
               </div>
@@ -431,6 +432,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                             {r.gapFilled && <span style={{ ...s.badge, background: "#fef3e2", color: "#92600a" }} title={`No gilt within ${windowMonths} months — window widened to ${r.effectiveWindowMonths} months`}>gap-filled</span>}
                             {r.nominal === 0 && <span style={{ ...s.badge, background: "#e8f5ef", color: "#1a6b4a" }} title="Coupons from longer rungs, held in cash, already cover this liability — nothing to buy.">covered by coupons</span>}
                             {r.exDiv && <span style={{ ...s.badge, background: "#e8f0fb", color: "#2563a8" }} title="Settlement is in the ex-dividend window: the next coupon goes to the seller; accrued is negative.">ex-div</span>}
+                          <div style={{ marginTop: 3 }}><BrokerLinks gilt={r.gilt} /></div>
                           </td>
                           <td style={{ ...s.td, background: bg, ...s.mono, fontSize: 12, color: "#9a978f" }}>{r.gilt.sym}</td>
                           <td style={{ ...s.tdR, background: bg, color: "#9a978f" }}

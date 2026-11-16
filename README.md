@@ -125,6 +125,11 @@ side never has to change.
   dirty price is ignored for that gilt. The ladder applies the clean price at its own
   settlement date. Overrides are one-off: page memory only — not saved, not in share
   links, cleared on reload.
+- **Broker links.** Each gilt links to its page on Hargreaves Lansdown (delayed price and
+  Deal button) and to AJ Bell's dealing screen (login needed), built from the gilt's ISIN
+  in `giltUniverse.js` (`src/brokerLinks.js`). They are plain outbound links: no broker
+  data is shown and no trades are placed here. Checked 16 Nov 2026; three gilts weren't
+  on AJ Bell's online list and link to its gilt price list instead.
 - **Ladder options:** inflation-linked liabilities (amounts in today's money), and
   coupon-offset sizing (coupons received before each liability, held in cash at the
   cash rate, pay part of it, so less nominal is bought). Each rung shows how long its
