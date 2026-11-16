@@ -109,6 +109,9 @@ It is directed only at financial advisers and professional and institutional inv
   prices may be stale, tax depends on circumstances, no affiliation with the linked brokers.
 - **Wording** is kept neutral: values are "highest" or signed differences, never "best" or
   "better"; the ladder "shows the gilt matching the rule you set", it does not recommend.
+- **Ladder candidates:** each rung lists every gilt maturing in its window, in maturity
+  order with the same figures for each, and the user can choose which one the calculation
+  uses (`choices` in `buildLadder`). The selection rule only sets the starting point.
 - Search engines are asked not to index the site (`noindex`).
 
 ## Notes

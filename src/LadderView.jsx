@@ -131,6 +131,62 @@ function CashflowChart({ result }) {
   );
 }
 
+// ── Candidate gilts for one rung ─────────────────────────────────────────────
+// Every gilt maturing in the rung's window, in maturity order (not ranked),
+// with the same figures for each. The user chooses which one the calculation
+// uses; nothing here marks one as preferable.
+function CandidateList({ rung, colSpan, onChoose, onReset, onClose }) {
+  const cell = { padding: "5px 10px", fontSize: 12, whiteSpace: "nowrap", borderBottom: "1px solid #e0deda" };
+  const head = { ...cell, fontSize: 10.5, fontWeight: 500, color: "#9a978f", letterSpacing: "0.04em" };
+  const R = { textAlign: "right" };
+  return (
+    <tr>
+      <td colSpan={colSpan} style={{ background: "#f7f6f3", borderBottom: "1px solid #e0deda", padding: "10px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6, fontSize: 12, color: "#5a5750" }}>
+          <span>
+            <strong style={{ color: "#1a1916", fontWeight: 500 }}>Gilts maturing in the window for {ymLabel(rung.liabilityDate)}</strong>
+            {" "}— listed by maturity date, not ranked. Choose which one this rung's calculation uses.
+          </span>
+          <span style={{ display: "inline-flex", gap: 6 }}>
+            {rung.selectedBy === "user" && <button style={s.btn} onClick={onReset}>Use my selection rule</button>}
+            <button style={s.btn} onClick={onClose}>Close</button>
+          </span>
+        </div>
+        <table style={{ borderCollapse: "collapse", background: "#fff", border: "1px solid #e0deda" }}>
+          <thead>
+            <tr>
+              <th style={{ ...head, textAlign: "left" }}>Gilt</th><th style={{ ...head, textAlign: "left" }}>EPIC</th>
+              <th style={{ ...head, ...R }}>Maturity</th><th style={{ ...head, ...R }}>Coupon</th>
+              <th style={{ ...head, ...R }}>Clean £</th><th style={{ ...head, ...R }}>Dirty £</th>
+              <th style={{ ...head, ...R }} title="After-tax yield to maturity at your tax settings, semi-annual compounding.">Net yield (s.a.)</th>
+              <th style={head} />
+            </tr>
+          </thead>
+          <tbody>
+            {rung.candidates.map(c => (
+              <tr key={c.gilt.sym}>
+                <td style={cell}>{c.gilt.name}{c.exDiv && <span style={{ ...s.badge, background: "#e8f0fb", color: "#2563a8" }}>ex-div</span>}</td>
+                <td style={{ ...cell, ...s.mono, color: "#9a978f" }}>{c.gilt.sym}</td>
+                <td style={{ ...cell, ...R }}>{toDate(c.gilt.mat).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}</td>
+                <td style={{ ...cell, ...R, ...s.mono }}>{c.gilt.c.toFixed(3)}%</td>
+                <td style={{ ...cell, ...R, ...s.mono }}>{c.cleanPx.toFixed(2)}</td>
+                <td style={{ ...cell, ...R, ...s.mono }}>{c.dirtyPx.toFixed(2)}</td>
+                <td style={{ ...cell, ...R, ...s.mono }}>{c.atYTM != null ? c.atYTM.toFixed(3) + "%" : "—"}</td>
+                <td style={{ ...cell, ...R }}>
+                  {c.selected
+                    ? <span style={{ fontSize: 11, color: "#5a5750" }}>in use</span>
+                    : <button style={{ ...s.btn, padding: "3px 9px", fontSize: 11 }} onClick={() => onChoose(c.gilt.sym)}
+                        aria-label={`Use ${c.gilt.name} for this rung`}>Use this gilt</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  );
+}
+
 // ── Exports (§4.4) ────────────────────────────────────────────────────────────
 function toCSV(result) {
   const head = ["Rung date", "Liability GBP", "Gilt", "EPIC", "Maturity", "Coupon %", "Clean", "Dirty", "Nominal GBP", "Cost GBP", "Net coupons GBP", "Redemption GBP", "Net IRR % (annual effective)", "Idle months", "Idle cash interest GBP", "Flags"];
@@ -160,6 +216,7 @@ function download(name, text, type) {
 // ── Main view ─────────────────────────────────────────────────────────────────
 export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf, snapshotLabel = "", liveDirty = {}, dirtySettlement = null, manual = {}, setManual }) {
   const [editing, setEditing] = useState(null);
+  const [listing, setListing] = useState(null); // rung index whose candidate list is open
   const saved = useMemo(readHash, []);
   const [rows, setRows] = useState(saved?.rows ?? defaultLiabilities());
   const [account, setAccount] = useState(saved?.account ?? "GIA");
@@ -170,12 +227,14 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
   const [cashRate, setCashRate] = useState(saved?.cash ?? 3.0);
   const [inflation, setInflation] = useState(saved?.infl ?? 0);
   const [sizing, setSizing] = useState(saved?.sizing ?? "simple");
+  // The user's own choice of gilt per rung, keyed by liability date (YYYY-MM-DD).
+  const [choices, setChoices] = useState(saved?.ch ?? {});
   const [qf, setQf] = useState({ amount: 50000, years: 3, start: defaultLiabilities()[0].date });
   const [copied, setCopied] = useState(null);
 
   const inputs = useMemo(
-    () => ({ rows, account, pref, w: windowMonths, inc: increment, settle, cash: cashRate, infl: inflation, sizing, taxRate }),
-    [rows, account, pref, windowMonths, increment, settle, cashRate, inflation, sizing, taxRate]
+    () => ({ rows, account, pref, w: windowMonths, inc: increment, settle, cash: cashRate, infl: inflation, sizing, ch: choices, taxRate }),
+    [rows, account, pref, windowMonths, increment, settle, cashRate, inflation, sizing, choices, taxRate]
   );
   const dIn = useDebounced(inputs, 250); // §5: recompute debounced 250ms
 
@@ -206,6 +265,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     cashNetRate: (Number(dIn.cash) || 3) / 100,
     inflation: (Number(dIn.infl) || 0) / 100,
     sizing: dIn.sizing === "couponOffset" ? "couponOffset" : "simple",
+    choices: dIn.ch || {},
   }), [dIn, priceInputs]);
 
   const t = result.totals;
@@ -321,6 +381,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
             <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>ℹ</span>
             <span>Enter future cash needs below (or use quick-fill). For each one the calculator shows the gilt that matches the
               selection rule and maturity window you set, sized so redemption at par covers the amount, and the resulting cash flows.
+              Each rung lists every gilt in its window so you can choose a different one.
               It is an illustration of the arithmetic, not a recommendation to buy any gilt.</span>
           </div>
         )}
@@ -433,7 +494,16 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                             {r.gapFilled && <span style={{ ...s.badge, background: "#fef3e2", color: "#92600a" }} title={`No gilt within ${windowMonths} months — window widened to ${r.effectiveWindowMonths} months`}>gap-filled</span>}
                             {r.nominal === 0 && <span style={{ ...s.badge, background: "#e8f5ef", color: "#1a6b4a" }} title="Coupons from longer rungs, held in cash, already cover this liability — nothing to buy.">covered by coupons</span>}
                             {r.exDiv && <span style={{ ...s.badge, background: "#e8f0fb", color: "#2563a8" }} title="Settlement is in the ex-dividend window: the next coupon goes to the seller; accrued is negative.">ex-div</span>}
-                          <div style={{ marginTop: 3 }}><BrokerLinks gilt={r.gilt} /></div>
+                          <div style={{ marginTop: 3, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                            <BrokerLinks gilt={r.gilt} />
+                            <button style={{ ...s.editBtn, marginLeft: 0, fontSize: 10.5, padding: "3px 7px", color: "#5a5750" }}
+                              onClick={() => setListing(k => (k === i ? null : i))}
+                              title="See every gilt maturing in this rung's window and choose which one the calculation uses"
+                              aria-label={`Show gilts in window for ${ymLabel(r.liabilityDate)}`}>
+                              {r.candidates.length} gilt{r.candidates.length > 1 ? "s" : ""} in window {listing === i ? "▴" : "▾"}
+                            </button>
+                            {r.selectedBy === "user" && <span style={{ ...s.badge, marginLeft: 0, background: "#f2f1ee", color: "#5a5750" }} title="You chose this gilt for this rung.">your choice</span>}
+                          </div>
                           </td>
                           <td style={{ ...s.td, background: bg, ...s.mono, fontSize: 12, color: "#9a978f" }}>{r.gilt.sym}</td>
                           <td style={{ ...s.tdR, background: bg, color: "#9a978f" }}
@@ -460,6 +530,12 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                           <td style={{ ...s.tdR, background: bg, ...s.mono }}>{gbp(r.nominal)}</td>
                           <td style={{ ...s.tdR, background: bg }}><strong style={{ ...s.mono, fontSize: 13, fontWeight: 500, color: "#1a6b4a" }}>{r.netIRR != null ? (r.netIRR * 100).toFixed(3) + "%" : "—"}</strong></td>
                         </tr>
+                        {listing === i && (
+                          <CandidateList rung={r} colSpan={13}
+                            onChoose={sym => setChoices(c => ({ ...c, [isoDay(r.liabilityDate)]: sym }))}
+                            onReset={() => setChoices(c => { const { [isoDay(r.liabilityDate)]: _, ...rest } = c; return rest; })}
+                            onClose={() => setListing(null)} />
+                        )}
                         {editing === i && (
                           <PriceEditor gilt={r.gilt} colSpan={13} taxRate={account === "GIA" ? taxRate : 0}
                             referenceClean={liveOverrides[r.gilt.sym] ?? r.gilt.px}
