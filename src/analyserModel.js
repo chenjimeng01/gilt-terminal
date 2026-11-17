@@ -1,6 +1,7 @@
 // Analyser row maths (moved out of GiltTerminal.jsx so it can be tested).
 
-import { settlementTerms, solveYTM } from "./giltMath.js";
+import { settlementTerms, solveYTM, afterTaxCouponFlows } from "./giltMath.js";
+import { bandSchedule, bandHeadroom, depositEquivalent, taxYearStart } from "./ukTax.js";
 import { MASTER } from "./giltUniverse.js";
 
 const YEAR = 365.25 * 86400000;
@@ -30,13 +31,25 @@ function getTenor(matStr, settlement) {
  *                 the file's asOf), using liveDirty[sym] when present.
  *  - g.px         the snapshot price, priced at `settlement` (T+1 after the
  *                 snapshot date).
+ * `taxProfile` = { otherIncome, otherSavings, amount } switches coupon tax from
+ * the flat `taxRate` to UK bands (ukTax.js): `amount` £ is put into each gilt
+ * on its own, its taxable interest is summed per tax year and taxed on top of
+ * the person's other income. Each row then carries `bands`:
+ *   nominal, annualInterest (a full year's coupons), interest / tax (whole
+ *   life), effRate (tax ÷ taxable interest), byYear, rateAt, and nilCost /
+ *   basicCost — what a holding of this gilt costs when a full year's coupons
+ *   exactly use the 0% headroom / reach the £50,270 higher-rate threshold.
+ *
  * Accrued interest and gross yield are always recomputed (MASTER's stored
  * ai/gy are not used). A null yield means no yield in range reprices the gilt.
  */
 export function analyseGilts({
   universe = MASTER, prices = {}, isLive, taxRate, settlement,
-  liveDirty = {}, manual = {}, today = new Date(),
+  liveDirty = {}, manual = {}, today = new Date(), taxProfile = null,
 }) {
+  const amount = Number(taxProfile?.amount) || 0;
+  const banded = !!taxProfile && amount > 0;
+  const head = banded ? bandHeadroom(taxProfile) : null;
   return universe
     .filter(g => new Date(g.mat) > today)
     .map(g => {
@@ -52,12 +65,31 @@ export function analyseGilts({
       const ai = Number.isFinite(dmoDirty) ? dmoDirty - cp : terms.ai;
 
       const grossYTM = solveYTM(g.c, g.mat, cp, ai, 0, settle);
-      const at = taxRate === 0 ? grossYTM : solveYTM(g.c, g.mat, cp, ai, taxRate, settle);
-      const gey = at != null ? calcGEY(at, taxRate) : null;
+      let at, gey, bands = null;
+      if (banded) {
+        const dirty = cp + ai;
+        const nominal = amount / dirty * 100;
+        const sched = bandSchedule(
+          afterTaxCouponFlows(g, settle, nominal, () => 0, { terms: { ...terms, ai } }), taxProfile);
+        at = solveYTM(g.c, g.mat, cp, ai, sched.rateAt, settle);
+        const midLife = new Date((+settle + +new Date(g.mat)) / 2);
+        gey = depositEquivalent(at, amount, taxProfile, taxYearStart(midLife));
+        const costFor = interest => (g.c > 0 ? interest / (g.c / 100) * dirty / 100 : null);
+        bands = {
+          nominal, annualInterest: nominal * g.c / 100,
+          interest: sched.interest, tax: sched.tax,
+          effRate: sched.interest > 0 ? sched.tax / sched.interest : 0,
+          byYear: sched.byYear, rateAt: sched.rateAt,
+          nilCost: costFor(head.nil), basicCost: costFor(head.toThreshold),
+        };
+      } else {
+        at = taxRate === 0 ? grossYTM : solveYTM(g.c, g.mat, cp, ai, taxRate, settle);
+        gey = at != null ? calcGEY(at, taxRate) : null;
+      }
       const drag = at != null && grossYTM != null ? grossYTM - at : null;
 
       return {
-        ...g, cp, ai, exDiv: terms.exDiv, grossYTM, at, gey, drag,
+        ...g, cp, ai, exDiv: terms.exDiv, grossYTM, at, gey, drag, bands,
         yrs: (new Date(g.mat) - settle) / YEAR,
         tenor: getTenor(g.mat, settle),
         couponType: g.c <= 2 ? "low" : "high",

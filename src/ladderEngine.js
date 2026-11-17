@@ -9,6 +9,7 @@ import {
   settlementTerms, afterTaxCouponFlows, solveYTM, addMonthsUTC, MS_DAY,
   addBusinessDays,
 } from "./giltMath.js";
+import { bandSchedule } from "./ukTax.js";
 
 export { addBusinessDays };
 
@@ -80,7 +81,8 @@ export function priceGilt(gilt, cleanPx, settlement, liveDirty = null) {
  * opts = {
  *   liabilities:   [{ date: 'YYYY-MM' | ISO | Date, amount: £ }]
  *   accountType:   'GIA' | 'ISA' | 'SIPP'      (ISA/SIPP ⇒ coupons untaxed)
- *   taxRate:       marginal income tax rate as a fraction (e.g. 0.45)
+ *   taxRate:       marginal income tax rate as a fraction (e.g. 0.45), or a
+ *                  function date → fraction (see buildLadderWithBands)
  *   preference:    'lowCoupon' | 'netYield'
  *   windowMonths:  a rung may use a gilt maturing up to this many months early
  *   settlement:    Date | ISO string
@@ -270,6 +272,74 @@ export function buildLadder(opts) {
   };
 
   return { settlement, accountType, taxRateEffective: tEff, rungs, totals, surplusByTaxYear, warnings };
+}
+
+/**
+ * buildLadder with coupon tax worked out from UK bands instead of a flat rate.
+ *
+ * `profile` = { otherIncome, otherSavings } (ukTax.js). The whole ladder's
+ * taxable interest is summed per tax year and taxed on top of that income;
+ * each year's tax is spread evenly over that year's coupons. Because the
+ * ladder (selection under "netYield", sizing under "couponOffset") can depend
+ * on the tax and the tax on the ladder, the two are iterated to a fixed point:
+ * build with the current per-year rates, re-tax the result, repeat until the
+ * rates stop moving. With the default rules this takes two builds.
+ *
+ * Under "netYield" there may be no fixed point: a low-coupon gilt lowers the
+ * tax rate, which makes a higher-coupon gilt rank first, which raises the rate
+ * again. Then each combination of gilts the iteration visited is held fixed,
+ * taxed consistently, and the one with the highest portfolio net IRR is used
+ * (with a warning saying so).
+ *
+ * Adds `taxBands` = { byYear, interest, tax, rateAt, converged } to the result
+ * (null for ISA/SIPP, which are untaxed).
+ */
+export function buildLadderWithBands(opts, profile) {
+  if ((opts.accountType ?? "GIA") !== "GIA") return { ...buildLadder(opts), taxBands: null };
+  const key = out => out.rungs.map(r => r.gilt?.sym ?? "-").join(",");
+
+  // Iterate rates ↔ ladder; stops early if a combination of gilts repeats
+  // without the rates having settled (a cycle).
+  const iterate = (o, maxIter) => {
+    let sched = bandSchedule([], profile), out, converged = false;
+    const seen = new Map();
+    for (let i = 0; i < maxIter && !converged; i++) {
+      const used = sched;
+      out = buildLadder({ ...o, taxRate: used.rateAt });
+      sched = bandSchedule(out.rungs.filter(r => !r.unfillable).flatMap(r => r.couponFlows), profile);
+      converged = sched.byYear.every(y =>
+        Math.abs(y.rate - used.rateAt(new Date(Date.UTC(y.year, 6, 1)))) < 1e-9);
+      if (converged) sched = { ...sched, rateAt: used.rateAt };
+      else if (i > 0 && seen.has(key(out)) && o.preference === "netYield") break;
+      seen.set(key(out), out);
+    }
+    return { out, sched, converged, seen };
+  };
+
+  let best = iterate(opts, 12);
+  let cycled = false;
+  if (!best.converged && best.seen.size > 1) {
+    cycled = true;
+    const fixed = [...best.seen.values()].map(o => {
+      const choices = { ...opts.choices };
+      for (const r of o.rungs) if (r.gilt) choices[r.liabilityDate.toISOString().slice(0, 10)] = r.gilt.sym;
+      return iterate({ ...opts, choices }, 30);
+    }).filter(x => x.converged);
+    if (fixed.length) {
+      best = fixed.reduce((a, b) => ((b.out.totals.portfolioIRR ?? -1) > (a.out.totals.portfolioIRR ?? -1) ? b : a));
+      // Those choices were this function's, not the user's.
+      for (const r of best.out.rungs) {
+        if (!r.unfillable && opts.choices?.[r.liabilityDate.toISOString().slice(0, 10)] !== r.gilt.sym) r.selectedBy = "rule";
+      }
+    }
+  }
+  const { out, sched, converged } = best;
+  if (!converged) {
+    out.warnings.push("Tax from other income did not settle: the ladder changes with the tax and the tax with the ladder. The tax shown is approximate — try the other selection rule or sizing.");
+  } else if (cycled) {
+    out.warnings.push("With tax worked out from other income, the highest-net-yield rule has no single answer here: which gilt nets most depends on the tax rate, and the tax rate on which gilts are held. Showing the combination with the highest portfolio net IRR of those the rule produced; each rung's window list shows the others.");
+  }
+  return { ...out, taxBands: { ...sched, converged } };
 }
 
 /** §3.1–3.2: candidate window and gilt selection for one liability. */

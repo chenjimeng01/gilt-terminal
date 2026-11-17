@@ -178,7 +178,11 @@ export function settlementTerms(coupon, matStr, settlement = NOW) {
  *    never above £5,000 in the tax year or the previous one, ITA 2007 s.639).
  *    Every coupon received is then taxed in full and the rebate is untaxed.
  *
- * Returns [{ date, gross, tax, net, rebate? }] in date order.
+ * `taxRate` is a fraction, or a function date → fraction when the rate differs
+ * by tax year (band-based tax, ukTax.js bandSchedule). `taxable` is the amount
+ * of each flow charged to income tax.
+ *
+ * Returns [{ date, gross, taxable, tax, net, rebate? }] in date order.
  * `opts.terms` may pass a precomputed settlementTerms result (its `ai` is used).
  */
 export function afterTaxCouponFlows(gilt, settlement, nominal, taxRate, opts = {}) {
@@ -188,14 +192,18 @@ export function afterTaxCouponFlows(gilt, settlement, nominal, taxRate, opts = {
   const semi = nominal * gilt.c / 200;
   const aiAmt = nominal * terms.ai / 100;
 
+  const banded = typeof taxRate === "function";
+  const rateAt = banded ? taxRate : () => taxRate;
+
   const flows = terms.coupons.map((date, i) => {
     const taxable = ais && !terms.exDiv && i === 0 ? Math.max(0, semi - aiAmt) : semi;
-    const tax = taxable * taxRate;
-    return { date, gross: semi, tax, net: semi - tax };
+    const tax = taxable * rateAt(date);
+    return { date, gross: semi, taxable, tax, net: semi - tax };
   });
-  if (ais && terms.exDiv && taxRate > 0) {
-    const tax = -aiAmt * taxRate; // aiAmt < 0 when ex-div
-    flows.unshift({ date: terms.next, gross: 0, tax, net: -tax, rebate: true });
+  if (ais && terms.exDiv && (banded || taxRate > 0)) {
+    const taxable = -aiAmt; // aiAmt < 0 when ex-div
+    const tax = taxable * rateAt(terms.next);
+    flows.unshift({ date: terms.next, gross: 0, taxable, tax, net: -tax, rebate: true });
   }
   return flows;
 }

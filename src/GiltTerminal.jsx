@@ -4,6 +4,8 @@ import { analyseGilts } from "./analyserModel.js";
 import LadderView from "./LadderView.jsx";
 import PriceEditor from "./PriceEditor.jsx";
 import BrokerLinks from "./BrokerLinks.jsx";
+import TaxInputs from "./TaxInputs.jsx";
+import { bandHeadroom } from "./ukTax.js";
 import BUILD_PRICE_FILE from "../public/gilt-prices.json";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -27,6 +29,9 @@ const SNAPSHOT_LABEL = new Date(SNAPSHOT_AS_OF + "T00:00:00Z")
   .toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const STALE_DAYS_WARN = 4;
 
+
+const gbp = n => "£" + Math.round(n).toLocaleString("en-GB");
+const gbpShort = n => (n == null ? "—" : n >= 1e6 ? `£${(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)}m` : gbp(n));
 
 // Sort with unsolvable (null) values always last, whatever the direction.
 const nullsLast = (key, cmp) => (a, b) =>
@@ -112,7 +117,8 @@ function Notice({ type, children, onDismiss }) {
   );
 }
 
-function SummaryCards({ data, taxRate }) {
+function SummaryCards({ data, taxRate, taxProfile }) {
+  const head = taxProfile ? bandHeadroom(taxProfile) : null;
   const solved = data.filter(g => g.at != null && g.drag != null);
   const best = solved.reduce((b, g) => (!b || g.at > b.at ? g : b), null);
   const avgDrag = solved.length ? solved.reduce((s, g) => s + g.drag, 0) / solved.length : 0;
@@ -134,16 +140,17 @@ function SummaryCards({ data, taxRate }) {
         <div style={s.cardSub}>gross minus after-tax</div>
       </div>
       <div style={s.card}>
-        <div style={s.cardLbl}>Tax rate applied</div>
-        <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{Math.round(taxRate * 100)}%</div>
-        <div style={s.cardSub}>coupons taxable; gains exempt</div>
+        <div style={s.cardLbl}>{head ? "Gilt interest before higher rate" : "Tax rate applied"}</div>
+        <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{head ? gbp(head.toThreshold) : `${Math.round(taxRate * 100)}%`}</div>
+        <div style={s.cardSub}>{head ? `a year: ${gbp(head.nil)} at 0%, ${gbp(head.basic)} at basic rate` : "coupons taxable; gains exempt"}</div>
       </div>
     </div>
   );
 }
 
-function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) {
+function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate, banded }) {
   const [editing, setEditing] = useState(null);
+  const nCols = banded ? 15 : 13;
   const solvedAt = data.filter(g => g.at != null).map(g => g.at);
   const maxAt = solvedAt.length ? Math.max(...solvedAt) : 1;
   const unsolved = data.filter(g => g.at == null || g.grossYTM == null);
@@ -167,13 +174,20 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
                 ["Gross YTM (s.a.)",     true],
                 ["After-Tax YTM (s.a.)", true],
                 ["Deposit Equiv. ▲", true], // renamed + tooltip
+                ...(banded ? [["Coupon tax ▲", true], ["Fills basic band ▲", true]] : []),
                 ["Tax Drag",         true],
                 ["Type",             true],
                 ["Relative",         true],
               ].map(([h, right]) => (
                 <th key={h} style={right ? s.thR : s.th} title={
                   h === "Deposit Equiv. ▲"
-                    ? "Gross yield a fully-taxable deposit would need to match this gilt's after-tax return: after-tax YTM ÷ (1 − tax rate)."
+                    ? (banded
+                      ? "Gross rate a fully-taxable deposit of the same amount would need to match this gilt's after-tax return, with the deposit's interest taxed by the same bands."
+                      : "Gross yield a fully-taxable deposit would need to match this gilt's after-tax return: after-tax YTM ÷ (1 − tax rate).")
+                    : h === "Coupon tax ▲"
+                    ? "Income tax on this gilt's coupons over its life as a share of the taxable interest, for the amount entered, on top of the other income entered. Hover a figure for the yearly interest and tax."
+                    : h === "Fills basic band ▲"
+                    ? "What a holding of this gilt alone would cost when a full year of its coupons takes income exactly to the £50,270 higher-rate threshold. Coupons on a larger holding start to be taxed at the higher rate. A calculation, not a suggested amount."
                     : h === "Gilt"
                     ? "HL and AJ Bell links open the gilt at that broker. Gilt Terminal isn't affiliated with either, receives nothing from them and places no trades; the links are not a recommendation to deal."
                     : h === "Clean £"
@@ -188,7 +202,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
           <tbody>
             {unsolved.length > 0 && (
               <tr>
-                <td colSpan={13} style={{ ...s.tdBase, background: "#fef3e2", color: "#92600a", fontSize: 12 }}>
+                <td colSpan={nCols} style={{ ...s.tdBase, background: "#fef3e2", color: "#92600a", fontSize: 12 }}>
                   ⚠ No yield between −50% and 100% reprices {unsolved.map(g => g.sym).join(", ")} at the
                   current price and accrued interest — shown as "—". Check the price before relying on it.
                 </td>
@@ -232,6 +246,18 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
                   {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#9a978f" }}>{pctFmt(g.grossYTM)}</span>, true)}
                   {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 14, fontWeight: 500, color: "#1a6b4a" }}>{pctFmt(g.at)}</strong>, true)}
                   {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 13, fontWeight: 500, color: "#2563a8" }}>{pctFmt(g.gey)}</strong>, true)}
+                  {banded && td(
+                    <span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#5a5750", cursor: "help" }}
+                      title={`${gbp(g.bands.nominal)} nominal pays ${gbp(g.bands.annualInterest)} a year in coupons.\n` +
+                        g.bands.byYear.slice(0, 6).map(y => `${y.label}: ${gbp(y.interest)} taxable, ${gbp(y.tax)} tax (${(y.rate * 100).toFixed(1)}%)`).join("\n") +
+                        (g.bands.byYear.length > 6 ? `\n… ${g.bands.byYear.length - 6} more years` : "")}>
+                      {(g.bands.effRate * 100).toFixed(1)}%
+                    </span>, true)}
+                  {banded && td(
+                    <span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#5a5750" }}
+                      title={g.bands.basicCost ? `0% headroom alone: ${gbpShort(g.bands.nilCost)} of this gilt` : undefined}>
+                      {g.bands.basicCost ? gbpShort(g.bands.basicCost) : "—"}
+                    </span>, true)}
                   {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#b91c1c" }}>{g.drag == null ? "—" : `-${g.drag.toFixed(2)}%`}</span>, true)}
                   {td(
                     <span style={{ display: "inline-block", fontSize: 10, fontWeight: 500, padding: "2px 7px", borderRadius: 12, letterSpacing: "0.03em", ...(g.couponType === "low" ? { background: "#e8f0fb", color: "#2563a8" } : { background: "#fef3e2", color: "#92600a" }) }}>
@@ -247,7 +273,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
                   )}
                 </tr>
                 {editing === g.sym && (
-                  <PriceEditor gilt={g} colSpan={13} taxRate={taxRate}
+                  <PriceEditor gilt={g} colSpan={nCols} taxRate={g.bands?.rateAt ?? taxRate}
                     referenceClean={liveOverrides[g.sym] ?? g.px}
                     current={manual[g.sym] ?? null}
                     onApply={m => setManual(prev => ({ ...prev, [g.sym]: m }))}
@@ -269,7 +295,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate }) 
 }
 
 // ── Methodology note ──────────────────────────────────────────────────────────
-function MethodologyNote({ taxRate, settlement }) {
+function MethodologyNote({ taxRate, settlement, banded }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -287,11 +313,24 @@ function MethodologyNote({ taxRate, settlement }) {
           current period, then whole half-years) with semi-annual compounding, so gross YTM is
           comparable with DMO and Bloomberg yields. Yields are semi-annual (s.a.); the
           annual-effective equivalent is (1 + y/2)² − 1.
-          Coupon income is taxed at {Math.round(taxRate * 100)}%; the redemption gain (£100 − clean price) is
+          Coupon income is taxed {banded ? "by band on top of the other income entered (below)" : `at ${Math.round(taxRate * 100)}%`}; the redemption gain (£100 − clean price) is
           CGT-exempt under TCGA 1992 s.115. Accrued income scheme: on a cum-dividend purchase
           only the portion of the first coupon accruing <em>after</em> purchase is taxed (relief
           for the accrued interest paid); on an ex-dividend purchase the next coupon goes to the
           seller and the buyer is taxed on the rebate interest (HMRC SAIM4150).
+          <br /><br />
+          <strong style={{ color: "#1a1916" }}>Tax from other income</strong> — instead of one flat
+          rate, the amount entered is put into each gilt on its own, its taxable interest is added up
+          per tax year and taxed as savings income on top of the other income entered: personal
+          allowance (£12,570, tapered above £100,000), starting rate for savings (up to £5,000 at 0%,
+          reduced by non-savings income above the allowance), personal savings allowance
+          (£1,000 / £500 / nil), basic rate to £50,270, higher rate to £125,140. Savings rates are
+          20/40/45% in 2026/27 and 22/42/47% from 6 April 2027; thresholds are held at today's
+          figures and other income is assumed the same every year. The tax is the increase caused by
+          the gilt interest, so it includes a smaller savings allowance once income crosses £50,270.
+          Dividends, Scottish rates on other income and the High Income Child Benefit Charge are not
+          modelled. <em>Fills basic band</em> is the cost of the holding whose full-year coupons take
+          income exactly to £50,270.
           <br /><br />
           <strong style={{ color: "#1a1916" }}>Settlement</strong> — accrued interest and yields are
           for settlement on {settlement.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })},
@@ -337,12 +376,27 @@ export default function GiltTerminal() {
   const [view, setView] = useState(() =>
     typeof window !== "undefined" && window.location.hash.startsWith("#ladder") ? "ladder" : "analyser");
 
+  // Band-based tax inputs: page memory only — never persisted, never in the URL.
+  const [taxMode, setTaxMode] = useState("flat");
+  const [income, setIncome] = useState("30000");
+  const [otherSavings, setOtherSavings] = useState("0");
+  const [holding, setHolding] = useState("100000");
+  const banded = taxMode === "bands";
+  const profile = useMemo(() => ({
+    otherIncome: Math.max(0, Number(income) || 0),
+    otherSavings: Math.max(0, Number(otherSavings) || 0),
+  }), [income, otherSavings]);
+  const tax = { mode: taxMode, setMode: setTaxMode, taxRate, setTaxRate, income, setIncome,
+    otherSavings, setOtherSavings, holding, setHolding, profile };
+  const analyserProfile = banded && Number(holding) > 0 ? { ...profile, amount: Number(holding) } : null;
+
   const settlement = useMemo(() => priceSettlement(isLive && asOf ? asOf : SNAPSHOT_AS_OF), [isLive, asOf]);
   const dirtyHere = isLive && dirtySettlement === settlement.toISOString().slice(0, 10) ? liveDirty : {};
   // Clean prices in force: the fetched file, else the build-time snapshot.
   const basePrices = isLive ? liveOverrides : SNAPSHOT_PRICES;
   const data = analyseGilts({
     prices: basePrices, isLive, taxRate, settlement, liveDirty: dirtyHere, manual,
+    taxProfile: analyserProfile,
   });
   const manualSyms = Object.keys(manual);
   const filtered = applyFilters(data, { matFilter, couponFilter, sortBy });
@@ -486,7 +540,8 @@ export default function GiltTerminal() {
 
         {/* Body */}
         {view === "ladder" ? (
-          <LadderView taxRate={taxRate} setTaxRate={setTaxRate}
+          <LadderView taxRate={taxRate} taxProfile={banded ? profile : null}
+            taxInputs={<TaxInputs tax={tax} />}
             liveOverrides={basePrices} isLive={isLive} asOf={asOf} snapshotLabel={SNAPSHOT_LABEL}
             liveDirty={liveDirty} dirtySettlement={dirtySettlement}
             manual={manual} setManual={setManual} />
@@ -496,16 +551,7 @@ export default function GiltTerminal() {
           <aside style={s.sidebar}>
             <div>
               <div style={s.secLbl}>Tax parameters</div>
-              <div style={{ marginBottom: "0.7rem" }}>
-                <div style={s.fieldRow}>
-                  <span>Income tax rate</span>
-                  <span style={s.fieldVal}>{Math.round(taxRate * 100)}%</span>
-                </div>
-                <input type="range" min={0} max={60} step={5} value={Math.round(taxRate * 100)}
-                  onChange={e => setTaxRate(parseInt(e.target.value) / 100)}
-                  style={{ width: "100%", height: 3, accentColor: "#1a6b4a", cursor: "pointer" }}
-                />
-              </div>
+              <TaxInputs tax={tax} showHolding />
               <div style={{ fontSize: 12, color: "#5a5750", marginBottom: 4 }}>CGT on gilt gains</div>
               <div style={{ fontFamily: "DM Mono, monospace", fontSize: 12, fontWeight: 500, color: "#1a6b4a" }}>0% — fully exempt</div>
             </div>
@@ -555,7 +601,7 @@ export default function GiltTerminal() {
               <Notice type={notice.type} onDismiss={() => setNotice(null)}>{notice.msg}</Notice>
             )}
 
-            <SummaryCards data={filtered} taxRate={taxRate} />
+            <SummaryCards data={filtered} taxRate={taxRate} taxProfile={analyserProfile} />
 
             <div style={s.panel}>
               <div style={s.panelHdr}>
@@ -569,12 +615,12 @@ export default function GiltTerminal() {
               </div>
               {filtered.length > 0
                 ? <GiltTable data={filtered} isLive={isLive} liveOverrides={basePrices}
-                    manual={manual} setManual={setManual} taxRate={taxRate} />
+                    manual={manual} setManual={setManual} taxRate={taxRate} banded={!!analyserProfile} />
                 : <div style={{ padding: "3rem 2rem", textAlign: "center", color: "#9a978f" }}>No gilts match the current filters.</div>
               }
             </div>
 
-            <MethodologyNote taxRate={taxRate} settlement={settlement} />
+            <MethodologyNote taxRate={taxRate} settlement={settlement} banded={!!analyserProfile} />
           </main>
         </div>
         )}

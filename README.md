@@ -16,6 +16,7 @@ UK Debt Management Office's published reference prices.
 │   ├── GiltTerminal.jsx                        # Analyser UI (after-tax YTM ranking)
 │   ├── LadderView.jsx                          # Ladder builder UI
 │   ├── giltMath.js                             # Shared maths: coupon schedule, accrued, ex-div, tax, YTM
+│   ├── ukTax.js                                # Income tax on gilt interest by band, from other income
 │   ├── ladderEngine.js                         # Ladder selection, sizing, cash flows, IRR, cash benchmark
 │   ├── giltUniverse.js                         # Tracked gilts (MASTER) with fallback prices
 │   └── main.jsx                                # React mount
@@ -135,6 +136,17 @@ It is directed only at financial advisers and professional and institutional inv
   (HMRC SAIM4150). The analyser and the ladder share this model.
 - **Ladder IRR** is annual effective (actual/365.25) so it compares directly with the
   cash rate; analyser yields are semi-annual. Annual = (1 + y/2)² − 1.
+- **Tax from other income.** Instead of the flat rate, "From other income" (analyser and
+  ladder sidebars) takes the person's other income and other savings interest and taxes
+  gilt interest on top of it by band (`src/ukTax.js`): personal allowance (tapered above
+  £100,000), starting rate for savings, personal savings allowance, basic rate to
+  £50,270, higher rate to £125,140; savings rates 20/40/45% in 2026/27 and 22/42/47% from
+  6 April 2027, thresholds held at today's figures. Taxable interest is summed per tax
+  year — per gilt for the amount entered in the analyser, across the whole ladder in the
+  ladder — and the tax is the increase the gilt interest causes. The analyser's "Fills
+  basic band" column is the cost of the holding whose full-year coupons take income
+  exactly to £50,270. Not modelled: dividends, Scottish rates on other income, HICBC.
+  These inputs stay in page memory: not saved, not in the share link.
 - **Ladder vs cash** values every after-tax coupon and redemption the ladder pays at the
   cash rate and subtracts its cost. It is positive exactly when the ladder's IRR beats
   the cash rate.

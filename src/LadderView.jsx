@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { MASTER } from "./giltUniverse.js";
-import { buildLadder, quickFill, addBusinessDays, toDate } from "./ladderEngine.js";
+import { buildLadder, buildLadderWithBands, quickFill, addBusinessDays, toDate } from "./ladderEngine.js";
 import { ladderPriceInputs } from "./manualPrices.js";
 import PriceEditor from "./PriceEditor.jsx";
 import BrokerLinks from "./BrokerLinks.jsx";
@@ -214,7 +214,7 @@ function download(name, text, type) {
 }
 
 // ── Main view ─────────────────────────────────────────────────────────────────
-export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive, asOf, snapshotLabel = "", liveDirty = {}, dirtySettlement = null, manual = {}, setManual }) {
+export default function LadderView({ taxRate, taxProfile = null, taxInputs, liveOverrides, isLive, asOf, snapshotLabel = "", liveDirty = {}, dirtySettlement = null, manual = {}, setManual }) {
   const [editing, setEditing] = useState(null);
   const [listing, setListing] = useState(null); // rung index whose candidate list is open
   const saved = useMemo(readHash, []);
@@ -233,13 +233,13 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
   const [copied, setCopied] = useState(null);
 
   const inputs = useMemo(
-    () => ({ rows, account, pref, w: windowMonths, inc: increment, settle, cash: cashRate, infl: inflation, sizing, ch: choices, taxRate }),
-    [rows, account, pref, windowMonths, increment, settle, cashRate, inflation, sizing, choices, taxRate]
+    () => ({ rows, account, pref, w: windowMonths, inc: increment, settle, cash: cashRate, infl: inflation, sizing, ch: choices, taxRate, taxProfile }),
+    [rows, account, pref, windowMonths, increment, settle, cashRate, inflation, sizing, choices, taxRate, taxProfile]
   );
   const dIn = useDebounced(inputs, 250); // §5: recompute debounced 250ms
 
   useEffect(() => {
-    const { taxRate: _t, ...toSave } = dIn;
+    const { taxRate: _t, taxProfile: _p, ...toSave } = dIn; // tax inputs never go in the URL
     writeHash(toSave);
   }, [dIn]);
 
@@ -250,7 +250,8 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
     [liveOverrides, isLive, liveDirty, dirtySettlement, manual]
   );
 
-  const result = useMemo(() => buildLadder({
+  const result = useMemo(() => (dIn.taxProfile
+    ? o => buildLadderWithBands(o, dIn.taxProfile) : buildLadder)({
     liabilities: dIn.rows,
     accountType: dIn.account,
     taxRate: dIn.taxRate,
@@ -269,6 +270,8 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
   }), [dIn, priceInputs]);
 
   const t = result.totals;
+  const bands = result.taxBands ?? null; // band-based coupon tax by tax year, when in use
+  const bandYear = Object.fromEntries((bands?.byYear ?? []).map(y => [y.label, y]));
   const filled = result.rungs.filter(r => !r.unfillable);
   const vsCash = t.cashAdvantage;
   const inflOn = t.inflation > 0;
@@ -303,17 +306,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
               <option value="SIPP">SIPP — no tax</option>
             </select>
           </div>
-          {account === "GIA" && (
-            <div style={{ marginBottom: "0.7rem" }}>
-              <div style={s.fieldRow}>
-                <span>Income tax rate</span>
-                <span style={s.fieldVal}>{Math.round(taxRate * 100)}%</span>
-              </div>
-              <input type="range" min={0} max={60} step={5} value={Math.round(taxRate * 100)}
-                onChange={e => setTaxRate(parseInt(e.target.value) / 100)}
-                style={{ width: "100%", height: 3, accentColor: "#1a6b4a", cursor: "pointer" }} />
-            </div>
-          )}
+          {account === "GIA" && taxInputs}
         </div>
 
         <hr style={s.hr} />
@@ -436,7 +429,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
               <div style={s.card}>
                 <div style={s.cardLbl} title="Annual compounding, actual/365.25 — comparable with the annual cash rate.">Portfolio net IRR (annual eff.)</div>
                 <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) + "%" : "—"}</div>
-                <div style={s.cardSub}>{account === "GIA" ? `after ${Math.round(taxRate * 100)}% on coupons` : "gross — " + account}</div>
+                <div style={s.cardSub}>{account !== "GIA" ? "gross — " + account : bands ? `after ${gbp(bands.tax)} band tax on coupons` : `after ${Math.round(taxRate * 100)}% on coupons`}</div>
               </div>
               <div style={s.card}>
                 <div style={s.cardLbl} title="Every after-tax coupon and redemption the ladder pays, valued at the cash rate (as if put on deposit until needed), minus what the ladder costs. Positive when the ladder's IRR is above the cash rate you entered. A calculation on your inputs, not a comparison of suitability.">Ladder minus cash at {Number(cashRate).toFixed(1)}% net ▲</div>
@@ -537,7 +530,7 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                             onClose={() => setListing(null)} />
                         )}
                         {editing === i && (
-                          <PriceEditor gilt={r.gilt} colSpan={13} taxRate={account === "GIA" ? taxRate : 0}
+                          <PriceEditor gilt={r.gilt} colSpan={13} taxRate={account === "GIA" ? (bands?.rateAt ?? taxRate) : 0}
                             referenceClean={liveOverrides[r.gilt.sym] ?? r.gilt.px}
                             current={manual[r.gilt.sym] ?? null}
                             note={`The ladder applies your clean price at its settlement date (${isoDay(result.settlement)}), so its dirty price and IRR use accrued interest at that date. Changing the price can change which gilt a rung shows.`}
@@ -580,7 +573,9 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
             {filled.length > 0 && Object.keys(result.surplusByTaxYear).length > 0 && (
               <div style={s.panel}>
                 <div style={s.panelHdr}>
-                  <span style={s.panelTtl} title="Coupons are savings income; your Personal Savings Allowance and starting rate for savings may cover some of this. Not modelled here.">
+                  <span style={s.panelTtl} title={bands
+                    ? "Coupons are taxed as savings income on top of the other income entered: each tax year's taxable interest across the whole ladder goes through the personal allowance, starting rate for savings, personal savings allowance and the rate bands."
+                    : "Coupons are savings income; your Personal Savings Allowance and starting rate for savings may cover some of this. Choose 'From other income' under Account & tax to model it."}>
                     {t.sizing === "couponOffset"
                       ? <>Coupon income by tax year ▲ — {account === "GIA" ? "after tax" : "gross"}, used towards the liabilities</>
                       : <>Surplus coupon income by tax year ▲ — {account === "GIA" ? "after tax" : "gross"}, not netted against liabilities</>}
@@ -590,6 +585,11 @@ export default function LadderView({ taxRate, setTaxRate, liveOverrides, isLive,
                   {Object.entries(result.surplusByTaxYear).map(([ty, v]) => (
                     <span key={ty} style={{ fontSize: 12, color: "#5a5750" }}>
                       {ty}: <strong style={{ ...s.mono, color: "#1a6b4a", fontWeight: 500 }}>{gbp(v)}</strong>
+                      {bandYear[ty] && (
+                        <span style={{ color: "#9a978f" }} title={`${gbp(bandYear[ty].interest)} taxable interest`}>
+                          {" "}· tax {gbp(bandYear[ty].tax)} ({(bandYear[ty].rate * 100).toFixed(1)}%)
+                        </span>
+                      )}
                     </span>
                   ))}
                 </div>
