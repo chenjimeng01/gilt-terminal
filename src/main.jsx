@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import "./theme.css";
 import GiltTerminal from "./GiltTerminal.jsx";
 import AccessGate from "./AccessGate.jsx";
 
