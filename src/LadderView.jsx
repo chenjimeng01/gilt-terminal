@@ -4,41 +4,15 @@ import { buildLadder, buildLadderWithBands, quickFill, addBusinessDays, toDate }
 import { ladderPriceInputs } from "./manualPrices.js";
 import PriceEditor from "./PriceEditor.jsx";
 import BrokerLinks from "./BrokerLinks.jsx";
+import SettingsPanel from "./SettingsPanel.jsx";
+import { s as base } from "./styles.js";
 
 const MAX_RUNGS = 20;
 
-// ── Styles — mirror GiltTerminal.jsx tokens exactly ──────────────────────────
 const s = {
-  layout: { display: "grid", gridTemplateColumns: "256px 1fr", flex: 1 },
-  sidebar: { background: "#fff", borderRight: "1px solid #e0deda", padding: "1.2rem", display: "flex", flexDirection: "column", gap: "1.1rem", overflowY: "auto" },
-  main: { padding: "1.4rem", display: "flex", flexDirection: "column", gap: "1.1rem", overflowY: "auto" },
-  secLbl: { fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9a978f", marginBottom: 6 },
-  fieldRow: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#5a5750", marginBottom: 4 },
-  fieldVal: { fontFamily: "DM Mono, monospace", fontSize: 12, fontWeight: 500, color: "#1a6b4a" },
-  selectEl: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, color: "#1a1916", fontFamily: "'DM Sans', sans-serif", fontSize: 13, padding: "7px 10px", width: "100%", outline: "none" },
-  inputEl: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, color: "#1a1916", fontFamily: "DM Mono, monospace", fontSize: 13, padding: "7px 10px", width: "100%", outline: "none" },
-  hr: { border: "none", borderTop: "1px solid #e0deda", margin: "0.1rem 0" },
-  sbFoot: { marginTop: "auto", paddingTop: "0.9rem", borderTop: "1px solid #e0deda", fontSize: 11, color: "#9a978f", lineHeight: 1.8 },
-  btn: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "7px 13px", borderRadius: 6, fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1px solid #e0deda", background: "#fff", color: "#5a5750", whiteSpace: "nowrap" },
-  cards: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem" },
-  card: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, padding: "0.9rem 1rem", boxShadow: "0 1px 3px rgba(0,0,0,.06)" },
-  cardLbl: { fontSize: 11, color: "#9a978f", marginBottom: 3 },
-  cardVal: { fontSize: 22, fontWeight: 300, letterSpacing: "-0.02em", lineHeight: 1 },
-  cardSub: { fontSize: 11, color: "#9a978f", marginTop: 2 },
-  panel: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, boxShadow: "0 1px 3px rgba(0,0,0,.06)", overflow: "hidden" },
-  panelHdr: { padding: "0.65rem 1rem", borderBottom: "1px solid #e0deda", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f2f1ee" },
-  panelTtl: { fontSize: 12, fontWeight: 500, color: "#5a5750" },
-  tblWrap: { overflowX: "auto" },
-  th: { background: "#f2f1ee", padding: "7px 11px", fontSize: 11, fontWeight: 500, letterSpacing: "0.04em", color: "#9a978f", textAlign: "left", borderBottom: "1px solid #e0deda", whiteSpace: "nowrap" },
-  thR: { background: "#f2f1ee", padding: "7px 11px", fontSize: 11, fontWeight: 500, letterSpacing: "0.04em", color: "#9a978f", textAlign: "right", borderBottom: "1px solid #e0deda", whiteSpace: "nowrap" },
-  td: { padding: "7px 11px", whiteSpace: "nowrap", verticalAlign: "middle", fontSize: 13, borderBottom: "1px solid #e0deda" },
-  tdR: { padding: "7px 11px", whiteSpace: "nowrap", verticalAlign: "middle", fontSize: 13, textAlign: "right", borderBottom: "1px solid #e0deda" },
-  noticeWarn: { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#fef3e2", color: "#92600a", border: "1px solid rgba(146,96,10,.2)" },
-  noticeInfo: { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#e8f0fb", color: "#2563a8", border: "1px solid rgba(37,99,168,.18)" },
-  mono: { fontFamily: "DM Mono, monospace" },
-  editBtn: { border: "1px solid #e0deda", background: "#fff", color: "#9a978f", borderRadius: 4, fontSize: 11, lineHeight: 1, padding: "3px 5px", cursor: "pointer", marginLeft: 5 },
-  manualBadge: { fontSize: 9.5, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", padding: "1px 6px", borderRadius: 10, background: "#fef3e2", color: "#92600a", cursor: "help", marginRight: 5 },
-  badge: { display: "inline-block", fontSize: 10, fontWeight: 500, padding: "2px 7px", borderRadius: 12, letterSpacing: "0.03em", marginLeft: 6 },
+  ...base,
+  editBtn: { ...base.editBtn, marginLeft: 5 },
+  manualBadge: { ...base.manualBadge, marginRight: 5 },
 };
 
 const gbp = (n, dp = 0) => "£" + n.toLocaleString("en-GB", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -101,32 +75,32 @@ function CashflowChart({ result }) {
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
       {years.map(d => (
         <g key={+d}>
-          <line x1={x(d)} y1={16} x2={x(d)} y2={mid + 34} stroke="#eae9e5" strokeWidth="1" />
-          <text x={x(d)} y={H - 14} fontSize="9" fill="#9a978f" textAnchor="middle" fontFamily="DM Mono, monospace">{d.getUTCFullYear()}</text>
+          <line x1={x(d)} y1={16} x2={x(d)} y2={mid + 34} stroke="var(--track)" strokeWidth="1" />
+          <text x={x(d)} y={H - 14} fontSize="10" fill="var(--text-3)" textAnchor="middle" fontFamily="var(--font-num)">{d.getUTCFullYear()}</text>
         </g>
       ))}
-      <line x1={PAD} y1={mid} x2={W - PAD} y2={mid} stroke="#c0bdb7" strokeWidth="1" />
+      <line x1={PAD} y1={mid} x2={W - PAD} y2={mid} stroke="var(--border-strong)" strokeWidth="1" />
       {/* outflow at settlement */}
-      <rect x={x(t0) - 3} y={mid} width="6" height={yUp(cost) * 0.4 + 8} fill="#b91c1c" rx="1">
+      <rect x={x(t0) - 3} y={mid} width="6" height={yUp(cost) * 0.4 + 8} fill="var(--neg)" rx="1">
         <title>{`Settlement ${isoDay(t0)}: −${gbp(cost)}`}</title>
       </rect>
       {/* coupons + redemptions */}
       {flows.map((f, i) => (
         <rect key={i} x={x(f.date) - (f.kind === "redemption" ? 3 : 1)} y={mid - yUp(f.v)}
           width={f.kind === "redemption" ? 6 : 2} height={yUp(f.v)}
-          fill={f.kind === "redemption" ? "#1a6b4a" : "#7fb8a0"} rx="1">
+          fill={f.kind === "redemption" ? "var(--accent)" : "var(--accent-2)"} rx="1">
           <title>{`${isoDay(toDate(f.date))}: +${gbp(f.v)} ${f.kind}`}</title>
         </rect>
       ))}
       {/* liability markers */}
       {filled.map((r, i) => (
         <g key={i} transform={`translate(${x(r.liabilityDate)}, ${mid + 16})`}>
-          <path d="M0 -5 L5 0 L0 5 L-5 0 Z" fill="none" stroke="#2563a8" strokeWidth="1.5">
+          <path d="M0 -5 L5 0 L0 5 L-5 0 Z" fill="none" stroke="var(--info)" strokeWidth="1.5">
             <title>{`Liability ${ymLabel(r.liabilityDate)}: ${gbp(r.liability)}`}</title>
           </path>
         </g>
       ))}
-      <text x={PAD} y={12} fontSize="9" fill="#9a978f" fontFamily="DM Mono, monospace">inflows ↑ (coupons light, redemptions dark) · outflow ↓ red · liabilities ◇</text>
+      <text x={PAD} y={12} fontSize="10" fill="var(--text-3)" fontFamily="var(--font-num)">inflows ↑ (coupons light, redemptions dark) · outflow ↓ red · liabilities ◇</text>
     </svg>
   );
 }
@@ -136,15 +110,15 @@ function CashflowChart({ result }) {
 // with the same figures for each. The user chooses which one the calculation
 // uses; nothing here marks one as preferable.
 function CandidateList({ rung, colSpan, onChoose, onReset, onClose }) {
-  const cell = { padding: "5px 10px", fontSize: 12, whiteSpace: "nowrap", borderBottom: "1px solid #e0deda" };
-  const head = { ...cell, fontSize: 10.5, fontWeight: 500, color: "#9a978f", letterSpacing: "0.04em" };
+  const cell = { padding: "5px 10px", fontSize: "0.75rem", whiteSpace: "nowrap", borderBottom: "1px solid var(--separator)" };
+  const head = { ...cell, fontSize: "0.6875rem", fontWeight: 500, color: "var(--text-3)", letterSpacing: "0.04em" };
   const R = { textAlign: "right" };
   return (
     <tr>
-      <td colSpan={colSpan} style={{ background: "#f7f6f3", borderBottom: "1px solid #e0deda", padding: "10px 14px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6, fontSize: 12, color: "#5a5750" }}>
+      <td colSpan={colSpan} style={{ background: "var(--bg)", borderBottom: "1px solid var(--separator)", padding: "12px 14px" }}>
+        <div className="gt-reveal" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6, fontSize: "0.75rem", color: "var(--text-2)" }}>
           <span>
-            <strong style={{ color: "#1a1916", fontWeight: 500 }}>Gilts maturing in the window for {ymLabel(rung.liabilityDate)}</strong>
+            <strong style={{ color: "var(--text)", fontWeight: 500 }}>Gilts maturing in the window for {ymLabel(rung.liabilityDate)}</strong>
             {" "}— listed by maturity date, not ranked. Choose which one this rung's calculation uses.
           </span>
           <span style={{ display: "inline-flex", gap: 6 }}>
@@ -152,7 +126,7 @@ function CandidateList({ rung, colSpan, onChoose, onReset, onClose }) {
             <button style={s.btn} onClick={onClose}>Close</button>
           </span>
         </div>
-        <table style={{ borderCollapse: "collapse", background: "#fff", border: "1px solid #e0deda" }}>
+        <table style={{ borderCollapse: "collapse", background: "var(--surface)", border: "1px solid var(--separator)", borderRadius: 10, overflow: "hidden", borderSpacing: 0 }}>
           <thead>
             <tr>
               <th style={{ ...head, textAlign: "left" }}>Gilt</th><th style={{ ...head, textAlign: "left" }}>EPIC</th>
@@ -165,8 +139,8 @@ function CandidateList({ rung, colSpan, onChoose, onReset, onClose }) {
           <tbody>
             {rung.candidates.map(c => (
               <tr key={c.gilt.sym}>
-                <td style={cell}>{c.gilt.name}{c.exDiv && <span style={{ ...s.badge, background: "#e8f0fb", color: "#2563a8" }}>ex-div</span>}</td>
-                <td style={{ ...cell, ...s.mono, color: "#9a978f" }}>{c.gilt.sym}</td>
+                <td style={cell}>{c.gilt.name}{c.exDiv && <span style={{ ...s.badge, background: "var(--info-soft)", color: "var(--info)" }}>ex-div</span>}</td>
+                <td style={{ ...cell, ...s.mono, color: "var(--text-3)" }}>{c.gilt.sym}</td>
                 <td style={{ ...cell, ...R }}>{toDate(c.gilt.mat).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}</td>
                 <td style={{ ...cell, ...R, ...s.mono }}>{c.gilt.c.toFixed(3)}%</td>
                 <td style={{ ...cell, ...R, ...s.mono }}>{c.cleanPx.toFixed(2)}</td>
@@ -174,8 +148,8 @@ function CandidateList({ rung, colSpan, onChoose, onReset, onClose }) {
                 <td style={{ ...cell, ...R, ...s.mono }}>{c.atYTM != null ? c.atYTM.toFixed(3) + "%" : "—"}</td>
                 <td style={{ ...cell, ...R }}>
                   {c.selected
-                    ? <span style={{ fontSize: 11, color: "#5a5750" }}>in use</span>
-                    : <button style={{ ...s.btn, padding: "3px 9px", fontSize: 11 }} onClick={() => onChoose(c.gilt.sym)}
+                    ? <span style={{ fontSize: "0.6875rem", color: "var(--text-2)" }}>in use</span>
+                    : <button style={{ ...s.btn, padding: "3px 9px", fontSize: "0.6875rem" }} onClick={() => onChoose(c.gilt.sym)}
                         aria-label={`Use ${c.gilt.name} for this rung`}>Use this gilt</button>}
                 </td>
               </tr>
@@ -215,7 +189,6 @@ function download(name, text, type) {
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 export default function LadderView({ taxRate, taxProfile = null, taxInputs, liveOverrides, isLive, asOf, snapshotLabel = "", liveDirty = {}, dirtySettlement = null, manual = {}, setManual }) {
-  const [showSettings, setShowSettings] = useState(false); // phones: sidebar collapsed by default
   const [editing, setEditing] = useState(null);
   const [listing, setListing] = useState(null); // rung index whose candidate list is open
   const saved = useMemo(readHash, []);
@@ -294,12 +267,9 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
   const empty = rows.filter(r => Number(r.amount) > 0).length === 0;
 
   return (
-    <div className="gt-layout" style={s.layout}>
+    <div className="gt-layout">
       {/* Sidebar — ladder inputs (§2) */}
-      <aside className={"gt-sidebar" + (showSettings ? " gt-open" : "")} style={s.sidebar}>
-            <button className="gt-settings-toggle" onClick={() => setShowSettings(v => !v)} aria-expanded={showSettings}>
-              Account, tax & ladder settings {showSettings ? "▴" : "▾"}
-            </button>
+      <SettingsPanel label="Account, tax & ladder">
         <div>
           <div style={s.secLbl}>Account & tax</div>
           <div style={{ marginBottom: "0.7rem" }}>
@@ -369,13 +339,13 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
           Illustrative calculation only — not advice or a recommendation. Prices indicative and may be stale.
           Gilt income is taxable; capital gains on conventional gilts are CGT-exempt for UK individuals.
         </div>
-      </aside>
+      </SettingsPanel>
 
       {/* Main */}
-      <main className="gt-main" style={s.main}>
+      <main className="gt-main">
         {empty && (
           <div style={s.noticeInfo}>
-            <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>ℹ</span>
+            <span style={{ fontSize: "0.875rem", flexShrink: 0, marginTop: 1 }}>ℹ</span>
             <span>Enter future cash needs below (or use quick-fill). For each one the calculator shows the gilt that matches the
               selection rule and maturity window you set, sized so redemption at par covers the amount, and the resulting cash flows.
               Each rung lists every gilt in its window so you can choose a different one.
@@ -384,7 +354,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
         )}
         {result.warnings.map((w, i) => (
           <div key={i} style={s.noticeWarn}>
-            <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>⚠</span><span>{w}</span>
+            <span style={{ fontSize: "0.875rem", flexShrink: 0, marginTop: 1 }}>⚠</span><span>{w}</span>
           </div>
         ))}
 
@@ -392,7 +362,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
         <div style={s.panel}>
           <div className="gt-panelHdr" style={s.panelHdr}>
             <span style={s.panelTtl}>Liabilities — when you need the money ({rows.length}/{MAX_RUNGS})</span>
-            <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#5a5750" }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: "0.75rem", color: "var(--text-2)" }}>
               £<input type="number" style={{ ...s.inputEl, width: 90, padding: "4px 7px" }} value={qf.amount}
                 onChange={e => setQf(q => ({ ...q, amount: e.target.value }))} />
               per year for
@@ -409,10 +379,10 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
               <div key={i} className="gt-liab-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input type="month" style={{ ...s.inputEl, width: 160 }} value={r.date}
                   onChange={e => setRow(i, { date: e.target.value })} />
-                <span style={{ fontSize: 13, color: "#5a5750" }}>£</span>
+                <span style={{ fontSize: "0.8125rem", color: "var(--text-2)" }}>£</span>
                 <input type="number" min={0} step={1000} style={{ ...s.inputEl, width: 140 }} value={r.amount}
                   onChange={e => setRow(i, { amount: e.target.value })} />
-                <button style={{ ...s.btn, padding: "5px 9px", color: "#b91c1c" }} onClick={() => delRow(i)}>✕</button>
+                <button style={{ ...s.btn, padding: "5px 9px", color: "var(--neg)" }} onClick={() => delRow(i)}>✕</button>
               </div>
             ))}
             <div>
@@ -427,24 +397,24 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
             <div className="gt-cards" style={s.cards}>
               <div style={s.card}>
                 <div style={s.cardLbl}>Total cost today</div>
-                <div style={{ ...s.cardVal, color: "#1a1916" }}>{gbp(t.cost)}</div>
+                <div style={{ ...s.cardVal, color: "var(--text)" }}>{gbp(t.cost)}</div>
                 <div style={s.cardSub}>{priceStamp}</div>
               </div>
               <div style={s.card}>
                 <div style={s.cardLbl} title="Annual compounding, actual/365.25 — comparable with the annual cash rate.">Portfolio net IRR (annual eff.)</div>
-                <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) + "%" : "—"}</div>
+                <div style={{ ...s.cardVal, color: "var(--accent)" }}>{t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) + "%" : "—"}</div>
                 <div style={s.cardSub}>{account !== "GIA" ? "gross — " + account : bands ? `after ${gbp(bands.tax)} band tax on coupons` : `after ${Math.round(taxRate * 100)}% on coupons`}</div>
               </div>
               <div style={s.card}>
                 <div style={s.cardLbl} title="Every after-tax coupon and redemption the ladder pays, valued at the cash rate (as if put on deposit until needed), minus what the ladder costs. Positive when the ladder's IRR is above the cash rate you entered. A calculation on your inputs, not a comparison of suitability.">Ladder minus cash at {Number(cashRate).toFixed(1)}% net ▲</div>
-                <div style={{ ...s.cardVal, color: "#1a1916" }}>{vsCash >= 0 ? "+" + gbp(vsCash) : "−" + gbp(-vsCash)}</div>
+                <div style={{ ...s.cardVal, color: "var(--text)" }}>{vsCash >= 0 ? "+" + gbp(vsCash) : "−" + gbp(-vsCash)}</div>
                 <div style={s.cardSub} title={`Ladder costs ${gbp(t.cost)}; its inflows are worth ${gbp(t.inflowsPV)} at ${Number(cashRate).toFixed(1)}%, of which ${gbp(t.inflowsPV - t.cashAlternative)} is surplus over the liabilities.`}>
                   cash needs {gbp(t.cashAlternative)}; ladder {gbp(t.ladderNetCost)} net of surplus
                 </div>
               </div>
               <div style={s.card}>
                 <div style={s.cardLbl}>Weighted avg life</div>
-                <div style={{ ...s.cardVal, color: "#1a1916" }}>{t.weightedAvgLife != null ? t.weightedAvgLife.toFixed(1) + "y" : "—"}</div>
+                <div style={{ ...s.cardVal, color: "var(--text)" }}>{t.weightedAvgLife != null ? t.weightedAvgLife.toFixed(1) + "y" : "—"}</div>
                 <div style={s.cardSub}>{filled.length} of {result.rungs.length} rungs filled</div>
               </div>
             </div>
@@ -471,47 +441,46 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
                   </thead>
                   <tbody>
                     {result.rungs.map((r, i) => {
-                      const bg = i % 2 === 0 ? "#fff" : "#fafaf9";
                       if (r.unfillable) return (
                         <tr key={i}>
-                          <td style={{ ...s.td, background: bg }}>{ymLabel(r.liabilityDate)}</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono }}>{gbp(r.liability)}</td>
-                          <td style={{ ...s.td, background: bg, color: "#b91c1c" }} colSpan={11}>
+                          <td style={{ ...s.td }}>{ymLabel(r.liabilityDate)}</td>
+                          <td style={{ ...s.tdR, ...s.mono }}>{gbp(r.liability)}</td>
+                          <td style={{ ...s.td, color: "var(--neg)" }} colSpan={11}>
                             Unfillable — beyond the longest available gilt; excluded from totals
                           </td>
                         </tr>
                       );
                       return (
                         <Fragment key={i}>
-                        <tr>
-                          <td style={{ ...s.td, background: bg }}>{ymLabel(r.liabilityDate)}</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono }} title={inflOn ? `${gbp(r.liabilityToday)} in today's money` : undefined}>{gbp(r.liability)}</td>
-                          <td style={{ ...s.td, background: bg }}>
+                        <tr className="gt-row">
+                          <td style={{ ...s.td }}>{ymLabel(r.liabilityDate)}</td>
+                          <td style={{ ...s.tdR, ...s.mono }} title={inflOn ? `${gbp(r.liabilityToday)} in today's money` : undefined}>{gbp(r.liability)}</td>
+                          <td style={{ ...s.td }}>
                             {r.gilt.name}
-                            {r.gapFilled && <span style={{ ...s.badge, background: "#fef3e2", color: "#92600a" }} title={`No gilt within ${windowMonths} months — window widened to ${r.effectiveWindowMonths} months`}>gap-filled</span>}
-                            {r.nominal === 0 && <span style={{ ...s.badge, background: "#e8f5ef", color: "#1a6b4a" }} title="Coupons from longer rungs, held in cash, already cover this liability — nothing to buy.">covered by coupons</span>}
-                            {r.exDiv && <span style={{ ...s.badge, background: "#e8f0fb", color: "#2563a8" }} title="Settlement is in the ex-dividend window: the next coupon goes to the seller; accrued is negative.">ex-div</span>}
+                            {r.gapFilled && <span style={{ ...s.badge, background: "var(--warn-soft)", color: "var(--warn)" }} title={`No gilt within ${windowMonths} months — window widened to ${r.effectiveWindowMonths} months`}>gap-filled</span>}
+                            {r.nominal === 0 && <span style={{ ...s.badge, background: "var(--accent-soft)", color: "var(--accent)" }} title="Coupons from longer rungs, held in cash, already cover this liability — nothing to buy.">covered by coupons</span>}
+                            {r.exDiv && <span style={{ ...s.badge, background: "var(--info-soft)", color: "var(--info)" }} title="Settlement is in the ex-dividend window: the next coupon goes to the seller; accrued is negative.">ex-div</span>}
                           <div style={{ marginTop: 3, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                             <BrokerLinks gilt={r.gilt} />
-                            <button style={{ ...s.editBtn, marginLeft: 0, fontSize: 10.5, padding: "3px 7px", color: "#5a5750" }}
+                            <button style={{ ...s.editBtn, marginLeft: 0, fontSize: "0.6875rem", padding: "3px 7px", color: "var(--text-2)" }}
                               onClick={() => setListing(k => (k === i ? null : i))}
                               title="See every gilt maturing in this rung's window and choose which one the calculation uses"
                               aria-label={`Show gilts in window for ${ymLabel(r.liabilityDate)}`}>
                               {r.candidates.length} gilt{r.candidates.length > 1 ? "s" : ""} in window {listing === i ? "▴" : "▾"}
                             </button>
-                            {r.selectedBy === "user" && <span style={{ ...s.badge, marginLeft: 0, background: "#f2f1ee", color: "#5a5750" }} title="You chose this gilt for this rung.">your choice</span>}
+                            {r.selectedBy === "user" && <span style={{ ...s.badge, marginLeft: 0, background: "var(--fill)", color: "var(--text-2)" }} title="You chose this gilt for this rung.">your choice</span>}
                           </div>
                           </td>
-                          <td style={{ ...s.td, background: bg, ...s.mono, fontSize: 12, color: "#9a978f" }}>{r.gilt.sym}</td>
-                          <td style={{ ...s.tdR, background: bg, color: "#9a978f" }}
+                          <td style={{ ...s.td, ...s.mono, fontSize: "0.75rem", color: "var(--text-3)" }}>{r.gilt.sym}</td>
+                          <td style={{ ...s.tdR, color: "var(--text-3)" }}
                             title={r.idleYears > 0 ? `Redeems ${Math.round(r.idleYears * 365.25)} days before the liability; the cash earns ${gbp(r.idleInterest)} at ${Number(cashRate).toFixed(1)}% meanwhile.` : undefined}>
                             {ymLabel(r.gilt.mat)}
                             {r.idleYears > 0 && r.nominal > 0 && (
-                              <div style={{ fontSize: 10, lineHeight: 1.3 }}>{r.idleMonths >= 1 ? `${r.idleMonths}m` : `${Math.round(r.idleYears * 365.25)}d`} early · +{gbp(r.idleInterest)}</div>
+                              <div style={{ fontSize: "0.6875rem", lineHeight: 1.3 }}>{r.idleMonths >= 1 ? `${r.idleMonths}m` : `${Math.round(r.idleYears * 365.25)}d`} early · +{gbp(r.idleInterest)}</div>
                             )}
                           </td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono, color: "#9a978f" }}>{r.gilt.c.toFixed(3)}%</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono }}>
+                          <td style={{ ...s.tdR, ...s.mono, color: "var(--text-3)" }}>{r.gilt.c.toFixed(3)}%</td>
+                          <td style={{ ...s.tdR, ...s.mono }}>
                             {manual[r.gilt.sym] && (
                               <span style={s.manualBadge}
                                 title={`Your price: ${manual[r.gilt.sym].kind} ${manual[r.gilt.sym].input}. Applied as clean ${manual[r.gilt.sym].clean.toFixed(4)} at this ladder's settlement date. One-off — not saved.`}>live</span>
@@ -520,12 +489,12 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
                             <button style={s.editBtn} onClick={() => setEditing(e => (e === i ? null : i))}
                               title="Enter a live price for this gilt (one-off)" aria-label={`Edit price for ${r.gilt.name}`}>✎</button>
                           </td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono }}>{r.dirtyPx.toFixed(2)}</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono }}>{gbp(r.nominal)}</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono, fontWeight: 500 }}>{gbp(r.cost)}</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono, color: "#1a6b4a" }}>{gbp(r.netCoupons)}</td>
-                          <td style={{ ...s.tdR, background: bg, ...s.mono }}>{gbp(r.nominal)}</td>
-                          <td style={{ ...s.tdR, background: bg }}><strong style={{ ...s.mono, fontSize: 13, fontWeight: 500, color: "#1a6b4a" }}>{r.netIRR != null ? (r.netIRR * 100).toFixed(3) + "%" : "—"}</strong></td>
+                          <td style={{ ...s.tdR, ...s.mono }}>{r.dirtyPx.toFixed(2)}</td>
+                          <td style={{ ...s.tdR, ...s.mono }}>{gbp(r.nominal)}</td>
+                          <td style={{ ...s.tdR, ...s.mono, fontWeight: 500 }}>{gbp(r.cost)}</td>
+                          <td style={{ ...s.tdR, ...s.mono, color: "var(--accent)" }}>{gbp(r.netCoupons)}</td>
+                          <td style={{ ...s.tdR, ...s.mono }}>{gbp(r.nominal)}</td>
+                          <td style={{ ...s.tdR }}><strong style={{ ...s.mono, fontSize: "0.8125rem", fontWeight: 500, color: "var(--accent)" }}>{r.netIRR != null ? (r.netIRR * 100).toFixed(3) + "%" : "—"}</strong></td>
                         </tr>
                         {listing === i && (
                           <CandidateList rung={r} colSpan={13}
@@ -546,19 +515,19 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
                       );
                     })}
                     <tr>
-                      <td style={{ ...s.td, background: "#f2f1ee", fontWeight: 500 }}>Total</td>
-                      <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500 }} title={inflOn ? `${gbp(t.liabilityToday)} in today's money` : undefined}>{gbp(t.liability)}</td>
-                      <td style={{ ...s.td, background: "#f2f1ee", fontSize: 11, color: "#9a978f" }} colSpan={6}>
+                      <td style={{ ...s.td, background: "var(--fill)", fontWeight: 500 }}>Total</td>
+                      <td style={{ ...s.tdR, background: "var(--fill)", ...s.mono, fontWeight: 500 }} title={inflOn ? `${gbp(t.liabilityToday)} in today's money` : undefined}>{gbp(t.liability)}</td>
+                      <td style={{ ...s.td, background: "var(--fill)", fontSize: "0.6875rem", color: "var(--text-3)" }} colSpan={6}>
                         weighted average life {t.weightedAvgLife != null ? t.weightedAvgLife.toFixed(1) : "—"}y
                         {inflOn && ` · liabilities grown at ${(t.inflation * 100).toFixed(1)}% a year`}
                         {t.sizing === "couponOffset" && " · sized net of coupons"}
                         {" · "}{priceStamp}
                       </td>
-                      <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500 }}>{gbp(t.nominal)}</td>
-                      <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500 }}>{gbp(t.cost)}</td>
-                      <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500, color: "#1a6b4a" }}>{gbp(t.netCoupons)}</td>
-                      <td style={{ ...s.tdR, background: "#f2f1ee", ...s.mono, fontWeight: 500 }}>{gbp(t.redemption)}</td>
-                      <td style={{ ...s.tdR, background: "#f2f1ee" }}><strong style={{ ...s.mono, fontSize: 13, fontWeight: 500, color: "#1a6b4a" }}>{t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) + "%" : "—"}</strong></td>
+                      <td style={{ ...s.tdR, background: "var(--fill)", ...s.mono, fontWeight: 500 }}>{gbp(t.nominal)}</td>
+                      <td style={{ ...s.tdR, background: "var(--fill)", ...s.mono, fontWeight: 500 }}>{gbp(t.cost)}</td>
+                      <td style={{ ...s.tdR, background: "var(--fill)", ...s.mono, fontWeight: 500, color: "var(--accent)" }}>{gbp(t.netCoupons)}</td>
+                      <td style={{ ...s.tdR, background: "var(--fill)", ...s.mono, fontWeight: 500 }}>{gbp(t.redemption)}</td>
+                      <td style={{ ...s.tdR, background: "var(--fill)" }}><strong style={{ ...s.mono, fontSize: "0.8125rem", fontWeight: 500, color: "var(--accent)" }}>{t.portfolioIRR != null ? (t.portfolioIRR * 100).toFixed(3) + "%" : "—"}</strong></td>
                     </tr>
                   </tbody>
                 </table>
@@ -587,10 +556,10 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
                 </div>
                 <div style={{ padding: "0.8rem 1rem", display: "flex", flexWrap: "wrap", gap: "0.6rem 1.6rem" }}>
                   {Object.entries(result.surplusByTaxYear).map(([ty, v]) => (
-                    <span key={ty} style={{ fontSize: 12, color: "#5a5750" }}>
-                      {ty}: <strong style={{ ...s.mono, color: "#1a6b4a", fontWeight: 500 }}>{gbp(v)}</strong>
+                    <span key={ty} style={{ fontSize: "0.75rem", color: "var(--text-2)" }}>
+                      {ty}: <strong style={{ ...s.mono, color: "var(--accent)", fontWeight: 500 }}>{gbp(v)}</strong>
                       {bandYear[ty] && (
-                        <span style={{ color: "#9a978f" }} title={`${gbp(bandYear[ty].interest)} taxable interest`}>
+                        <span style={{ color: "var(--text-3)" }} title={`${gbp(bandYear[ty].interest)} taxable interest`}>
                           {" "}· tax {gbp(bandYear[ty].tax)} ({(bandYear[ty].rate * 100).toFixed(1)}%)
                         </span>
                       )}

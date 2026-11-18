@@ -1,0 +1,348 @@
+/* Gilt Terminal design tokens and base styles.
+   Colours adapt to light and dark; type uses the platform's system font. */
+
+:root {
+  color-scheme: light dark;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-num: var(--font-sans); /* figures: system font, tabular (set on body) */
+  --header-h: 3.25rem;
+
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --fill: #f0f0f3;
+  --track: #e5e5ea;
+  --separator: #e3e3e8;
+  --border: #d2d2d7;
+  --border-strong: #b8b8bf;
+
+  --text: #1d1d1f;
+  --text-2: #48484d;
+  --text-3: #6e6e73;
+
+  --accent: #1a6b4a;
+  --accent-2: #7fb8a0;
+  --accent-soft: #e6f4ed;
+  --accent-border: rgba(26, 107, 74, .2);
+  --accent-ring: rgba(26, 107, 74, .3);
+  --on-accent: #ffffff;
+  --neg: #b91c1c;
+  --info: #1f5aa0;
+  --info-soft: #e8f0fb;
+  --info-border: rgba(37, 99, 168, .18);
+  --warn: #8a5a06;
+  --warn-soft: #fdf1dd;
+  --warn-border: rgba(146, 96, 10, .2);
+
+  /* Materials: thicker (more opaque, more blur) for bigger surfaces */
+  --material: rgba(255, 255, 255, .72);
+  --material-thick: rgba(250, 250, 252, .88);
+  --material-edge: rgba(255, 255, 255, .6);
+  --scrim: rgba(0, 0, 0, .32);
+  --seg-bg: rgba(118, 118, 128, .14);
+  --seg-thumb: #ffffff;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .04), 0 6px 20px rgba(0, 0, 0, .04);
+  --shadow-2: 0 0 0 .5px rgba(0, 0, 0, .08), 0 8px 28px rgba(0, 0, 0, .16);
+  --shadow-3: 0 -10px 40px rgba(0, 0, 0, .2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --surface: #1c1c1e;
+    --fill: #2a2a2d;
+    --track: #3a3a3c;
+    --separator: #2f2f32;
+    --border: #48484a;
+    --border-strong: #636366;
+
+    --text: #f5f5f7;
+    --text-2: #c2c2c7;
+    --text-3: #98989d;
+
+    --accent: #4fca90;
+    --accent-2: #2f7d59;
+    --accent-soft: rgba(79, 202, 144, .16);
+    --accent-border: rgba(79, 202, 144, .3);
+    --accent-ring: rgba(79, 202, 144, .4);
+    --on-accent: #03170d;
+    --neg: #ff6b62;
+    --info: #74aefc;
+    --info-soft: rgba(116, 174, 252, .16);
+    --info-border: rgba(116, 174, 252, .28);
+    --warn: #f2b84b;
+    --warn-soft: rgba(242, 184, 75, .15);
+    --warn-border: rgba(242, 184, 75, .3);
+
+    --material: rgba(22, 22, 24, .72);
+    --material-thick: rgba(36, 36, 38, .88);
+    --material-edge: rgba(255, 255, 255, .1);
+    --scrim: rgba(0, 0, 0, .55);
+    --seg-bg: rgba(118, 118, 128, .26);
+    --seg-thumb: #636366;
+
+    --shadow-1: none;
+    --shadow-2: 0 0 0 .5px rgba(255, 255, 255, .12), 0 8px 28px rgba(0, 0, 0, .6);
+    --shadow-3: 0 -10px 40px rgba(0, 0, 0, .6);
+  }
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 0.875rem/1.45 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font-family: inherit; font-variant-numeric: inherit; }
+a { color: var(--info); }
+code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .95em; }
+
+/* Feedback on the press itself, not on release */
+button, .gt-pressable {
+  transition: transform 100ms ease-out, filter 100ms ease-out, opacity 150ms ease-out;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+button:active:not(:disabled), .gt-pressable:active { transform: scale(.97); filter: brightness(.94); }
+button:disabled { opacity: .45; cursor: default !important; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input:not([type="range"]):not([type="radio"]):not([type="checkbox"]), select {
+  transition: box-shadow 120ms ease-out, border-color 120ms ease-out;
+}
+input:not([type="range"]):not([type="radio"]):not([type="checkbox"]):focus-visible, select:focus-visible {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+input[type="range"], input[type="radio"], input[type="checkbox"] { accent-color: var(--accent); }
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8a8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px !important;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+/* Surfaces arrive as a material: blur and scale together, not a bare fade */
+@keyframes materialise {
+  from { opacity: 0; transform: translateY(-6px) scale(.97); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.gt-reveal { animation: reveal 220ms cubic-bezier(.2, .8, .2, 1); transform-origin: top; }
+
+/* ── App shell ──────────────────────────────────────────────────────────── */
+.gt-wrap { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+
+.gt-header {
+  position: sticky; top: 0; z-index: 100;
+  height: var(--header-h);
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px;
+  padding: 0 1.25rem;
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  background: var(--material);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  /* Edge appears only once content is scrolling underneath */
+  border-bottom: 1px solid transparent;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.gt-header[data-scrolled="true"] { border-bottom-color: var(--separator); box-shadow: 0 1px 12px rgba(0, 0, 0, .05); }
+.gt-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.gt-mark {
+  width: 1.75rem; height: 1.75rem; flex: none; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent);
+  font-size: .6875rem; font-weight: 700; letter-spacing: .02em;
+}
+.gt-title { font-size: .9375rem; font-weight: 600; letter-spacing: -.012em; white-space: nowrap; }
+.gt-logoSub { font-size: .75rem; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gt-hdrRight { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
+.gt-stamp { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; color: var(--text-3); white-space: nowrap; }
+.gt-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.gt-infoBar {
+  padding: 8px 1.25rem; color: var(--text-3); font-size: .75rem; line-height: 1.55;
+  border-bottom: 1px solid var(--separator);
+}
+.gt-manualBar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 1.25rem; background: var(--warn-soft); color: var(--warn);
+  border-bottom: 1px solid var(--warn-border); font-size: .78rem;
+}
+
+.gt-layout { display: grid; grid-template-columns: 16.5rem minmax(0, 1fr); flex: 1; }
+.gt-main { min-width: 0; padding: 1.4rem; display: flex; flex-direction: column; gap: 1.1rem; }
+
+/* Sidebar: a heavier, tinted region that stays beside the content */
+.gt-sidebar {
+  position: sticky; top: var(--header-h); align-self: start;
+  height: calc(100vh - var(--header-h)); height: calc(100dvh - var(--header-h));
+  overflow-y: auto; overscroll-behavior: contain;
+  border-right: 1px solid var(--separator);
+}
+.gt-sidebar-body { min-height: 100%; padding: 1.2rem; display: flex; flex-direction: column; gap: 1.1rem; }
+
+/* ── Segmented control ──────────────────────────────────────────────────── */
+.gt-seg {
+  position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  padding: 2px; border-radius: 9px; background: var(--seg-bg);
+}
+.gt-seg-stretch { display: grid; width: 100%; }
+.gt-seg-thumb {
+  position: absolute; top: 2px; bottom: 2px; left: 2px;
+  width: calc((100% - 4px) / var(--n));
+  border-radius: 7px; background: var(--seg-thumb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 0 0 .5px rgba(0, 0, 0, .04);
+}
+.gt-seg button {
+  position: relative; z-index: 1; border: 0; background: none; cursor: pointer;
+  min-height: 1.75rem; padding: 4px 14px; border-radius: 7px;
+  font-size: .8125rem; font-weight: 500; color: var(--text-2); white-space: nowrap;
+}
+.gt-seg button[aria-pressed="true"] { color: var(--text); font-weight: 600; }
+.gt-seg-sm button { min-height: 1.5rem; padding: 3px 8px; font-size: .75rem; }
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+.gt-tblWrap { -webkit-overflow-scrolling: touch; }
+tr:last-child td { border-bottom: none !important; }
+th[title] { cursor: help; text-decoration: underline dotted var(--border-strong); text-underline-offset: 3px; }
+@media (hover: hover) {
+  .gt-row:hover > td { background: var(--fill); }
+  .gt-row > td { transition: background-color 80ms ease-out; }
+}
+
+/* ── Toast: floating status over the content, never pushing it around ───── */
+.gt-toast {
+  position: fixed; z-index: 150; top: calc(var(--header-h) + 12px); left: 0; right: 0;
+  margin: 0 auto; width: max-content; max-width: min(34rem, calc(100vw - 24px));
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 12px 10px 14px; border-radius: 14px;
+  font-size: .8125rem; font-weight: 500; line-height: 1.5; color: var(--text);
+  background: var(--material-thick);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border-top: 1px solid var(--material-edge);
+  box-shadow: var(--shadow-2);
+  transform-origin: top center;
+  animation: materialise 320ms cubic-bezier(.2, .8, .2, 1);
+}
+.gt-toast-icon { flex: none; width: 1.25rem; height: 1.25rem; border-radius: 50%; display: grid; place-items: center; font-size: .75rem; font-weight: 700; }
+.gt-toast[data-type="ok"] .gt-toast-icon { background: var(--accent); color: var(--on-accent); }
+.gt-toast[data-type="warn"] .gt-toast-icon { background: var(--warn); color: var(--surface); }
+.gt-toast[data-type="info"] .gt-toast-icon { background: var(--info); color: var(--surface); }
+.gt-toast-close {
+  flex: none; width: 1.5rem; height: 1.5rem; min-height: 0 !important; border: 0; border-radius: 50%;
+  background: var(--seg-bg); color: var(--text-2); font-size: .6875rem; cursor: pointer;
+}
+
+/* ── Bottom sheet (phones) ──────────────────────────────────────────────── */
+.gt-sheet-trigger {
+  position: fixed; z-index: 90; left: 0; right: 0; margin: 0 auto; width: max-content; max-width: calc(100vw - 32px);
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 2.75rem; padding: 0 18px; border-radius: 999px; cursor: pointer;
+  font-size: .875rem; font-weight: 600; letter-spacing: .005em; color: var(--text);
+  background: var(--material);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 0; border-top: 1px solid var(--material-edge);
+  box-shadow: var(--shadow-2);
+}
+.gt-scrim { position: fixed; inset: 0; z-index: 200; background: var(--scrim); opacity: 0; pointer-events: none; }
+.gt-scrim[data-open="true"] { pointer-events: auto; }
+.gt-sheet-handle {
+  flex: none; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 22px 16px 10px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.gt-sheet-handle:active { cursor: grabbing; }
+.gt-grabber { position: absolute; top: 7px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 3px; background: var(--border-strong); opacity: .7; }
+.gt-sheet-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -.015em; }
+.gt-sheet-done { border: 0; background: none; color: var(--accent); font-size: 1rem; font-weight: 600; padding: 6px 4px; cursor: pointer; }
+
+/* ── Phones and narrow tablets ──────────────────────────────────────────── */
+.gt-mobile-only { display: none; }
+@media (max-width: 820px) {
+  .gt-header { padding: 0 12px; gap: 8px; grid-template-columns: auto 1fr auto; }
+  .gt-header > .gt-seg { justify-self: center; }
+  .gt-logoSub, .gt-stamp, .gt-btn-label { display: none !important; }
+  .gt-infoBar, .gt-manualBar { padding: 8px 12px; font-size: .6875rem; }
+  .gt-layout { grid-template-columns: minmax(0, 1fr); }
+  .gt-main { padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); gap: 12px; }
+
+  .gt-sheet {
+    position: fixed; z-index: 210; top: auto; left: 0; right: 0; bottom: 0;
+    height: auto; max-height: min(88vh, 46rem); max-height: min(88dvh, 46rem);
+    display: flex; flex-direction: column; overflow: visible;
+    border: 0; border-top: 1px solid var(--material-edge); border-radius: 18px 18px 0 0;
+    background: var(--material-thick);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    backdrop-filter: blur(30px) saturate(180%);
+    box-shadow: var(--shadow-3);
+    transform: translateY(100%);
+    will-change: transform;
+    outline: none;
+  }
+  .gt-sheet[data-visible="false"] { visibility: hidden; }
+  /* Keeps the gap closed when a flick overshoots past fully open */
+  .gt-sheet::after { content: ""; position: absolute; top: 100%; left: 0; right: 0; height: 120px; background: var(--material-thick); }
+  .gt-sheet .gt-sidebar-body {
+    min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding: 6px 16px calc(20px + env(safe-area-inset-bottom));
+  }
+
+  .gt-cards { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+  .gt-cards > div { padding: 12px 14px !important; }
+  .gt-cards > div > div:nth-child(2) { font-size: 1.375rem !important; }
+  .gt-panelHdr { flex-wrap: wrap; gap: 8px; }
+  .gt-panelHdr > div { flex-wrap: wrap; }
+  .gt-liab-row input { min-width: 0; flex: 1 1 0; width: auto !important; padding: 7px 8px !important; }
+  .gt-liab-row input[type="month"] { flex: 2.4 1 0; }
+  .gt-panelHdr input[type="month"] { width: 190px !important; }
+  /* 16px stops iOS zooming the page when a field is focused */
+  input[type="number"], input[type="month"], input[type="date"], input[inputmode], select { font-size: 16px !important; }
+  button { min-height: 32px; }
+  /* Analyser table: drop #, Coupon (in the name), Maturity (shown under the
+     name), Tenor, Δ Price, Type and Relative; pin the gilt name, so price and
+     yields fit beside it */
+  .gt-analyser-table tr > :nth-child(3),
+  .gt-analyser-table tr > :nth-child(4),
+  .gt-analyser-table tr > :nth-child(1):not([colspan]),
+  .gt-analyser-table tr > :nth-child(5),
+  .gt-analyser-table tr > :nth-child(7),
+  .gt-analyser-table tr > :nth-last-child(1):not([colspan]),
+  .gt-analyser-table tr > :nth-last-child(2) { display: none; }
+  .gt-analyser-table tr > :nth-child(2) { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--separator); }
+  .gt-analyser-table tr > :nth-child(2) > span:first-child { max-width: 132px !important; white-space: normal !important; }
+  .gt-analyser-table th, .gt-analyser-table td { padding: 8px !important; }
+  .gt-analyser-table th { white-space: normal !important; vertical-align: bottom; }
+  .gt-mobile-only { display: block !important; }
+}
+
+/* ── Accessibility preferences ──────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  button:active:not(:disabled), .gt-pressable:active { transform: none; }
+  .gt-reveal, .gt-toast { animation: fade 200ms ease; }
+  .gt-sheet, .gt-scrim, .gt-sheet-trigger { transition: opacity 200ms ease; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root { --material: var(--surface); --material-thick: var(--surface); }
+  .gt-header, .gt-toast, .gt-sheet, .gt-sheet-trigger { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .gt-header { border-bottom-color: var(--separator); }
+}
+@media (prefers-contrast: more) {
+  :root {
+    --material: var(--surface); --material-thick: var(--surface);
+    --separator: var(--border-strong); --border: var(--text-3); --text-3: var(--text-2);
+  }
+  .gt-header, .gt-toast, .gt-sheet, .gt-sheet-trigger { -webkit-backdrop-filter: none; backdrop-filter: none; border: 1px solid var(--text-2); }
+}

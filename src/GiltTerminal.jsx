@@ -5,6 +5,9 @@ import LadderView from "./LadderView.jsx";
 import PriceEditor from "./PriceEditor.jsx";
 import BrokerLinks from "./BrokerLinks.jsx";
 import TaxInputs from "./TaxInputs.jsx";
+import Segmented from "./Segmented.jsx";
+import SettingsPanel from "./SettingsPanel.jsx";
+import { s } from "./styles.js";
 import { bandHeadroom } from "./ukTax.js";
 import BUILD_PRICE_FILE from "../public/gilt-prices.json";
 
@@ -30,6 +33,14 @@ const SNAPSHOT_LABEL = new Date(SNAPSHOT_AS_OF + "T00:00:00Z")
 const STALE_DAYS_WARN = 4;
 
 
+const VIEWS = [{ value: "analyser", label: "Analyser" }, { value: "ladder", label: "Ladder" }];
+const TENORS = [
+  { value: "all", label: "All" }, { value: "short", label: "0–5y" },
+  { value: "medium", label: "5–15y" }, { value: "long", label: "15y+" },
+];
+const SORT_OPTS = [["atYTM","After-tax YTM ↓"],["grossYTM","Gross YTM ↓"],["taxDrag","Tax drag ↑"],["maturity","Maturity date ↑"],["cleanPx","Clean price ↑"]];
+const SORT_TITLES = { atYTM: "after-tax yield to maturity", grossYTM: "gross yield to maturity", taxDrag: "tax drag, lowest first", maturity: "maturity date", cleanPx: "clean price, lowest first" };
+
 const gbp = n => "£" + Math.round(n).toLocaleString("en-GB");
 const gbpShort = n => (n == null ? "—" : n >= 1e6 ? `£${(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)}m` : gbp(n));
 
@@ -51,68 +62,15 @@ function applyFilters(data, { matFilter, couponFilter, sortBy }) {
   return d.sort(sorts[sortBy] ?? sorts.atYTM);
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-const s = {
-  wrap: { display: "flex", flexDirection: "column", minHeight: "100vh", background: "#f7f6f3", fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: "#1a1916" },
-  header: { background: "#fff", borderBottom: "1px solid #e0deda", padding: "0 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 3px rgba(0,0,0,.06)" },
-  logoWrap: { display: "flex", alignItems: "center", gap: 10 },
-  logoMark: { width: 30, height: 30, background: "#1a6b4a", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontFamily: "DM Mono, monospace", fontSize: 11, fontWeight: 500 },
-  logoText: { fontSize: 15, fontWeight: 500, letterSpacing: "-0.01em" },
-  logoSub: { fontSize: 12, color: "#9a978f", marginLeft: 4 },
-  hdrRight: { display: "flex", alignItems: "center", gap: 10 },
-  editBtn: { border: "1px solid #e0deda", background: "#fff", color: "#9a978f", borderRadius: 4, fontSize: 11, lineHeight: 1, padding: "3px 5px", cursor: "pointer" },
-  manualBadge: { fontSize: 9.5, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", padding: "1px 6px", borderRadius: 10, background: "#fef3e2", color: "#92600a", cursor: "help" },
-  infoBar: { padding: "7px 1.5rem", background: "#f2f1ee", borderBottom: "1px solid #e0deda", color: "#5a5750", fontSize: 12, lineHeight: 1.55 },
-  manualBar: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "7px 1.5rem", background: "#fef3e2", borderBottom: "1px solid rgba(146,96,10,.2)", color: "#92600a", fontSize: 12.5 },
-  livePill: { display: "flex", alignItems: "center", gap: 5, background: "#e8f5ef", color: "#1a6b4a", padding: "4px 10px", borderRadius: 20, fontSize: 11, fontWeight: 500 },
-  stamp: { fontSize: 11, color: "#9a978f" },
-  layout: { display: "grid", gridTemplateColumns: "256px 1fr", flex: 1 },
-  sidebar: { background: "#fff", borderRight: "1px solid #e0deda", padding: "1.2rem", display: "flex", flexDirection: "column", gap: "1.1rem", overflowY: "auto" },
-  main: { padding: "1.4rem", display: "flex", flexDirection: "column", gap: "1.1rem", overflowY: "auto" },
-  secLbl: { fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9a978f", marginBottom: 6 },
-  fieldRow: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#5a5750", marginBottom: 4 },
-  fieldVal: { fontFamily: "DM Mono, monospace", fontSize: 12, fontWeight: 500, color: "#1a6b4a" },
-  selectEl: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, color: "#1a1916", fontFamily: "'DM Sans', sans-serif", fontSize: 13, padding: "7px 10px", width: "100%", outline: "none" },
-  hr: { border: "none", borderTop: "1px solid #e0deda", margin: "0.1rem 0" },
-  sbFoot: { marginTop: "auto", paddingTop: "0.9rem", borderTop: "1px solid #e0deda", fontSize: 11, color: "#9a978f", lineHeight: 1.8 },
-  btnRefresh: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "7px 13px", borderRadius: 6, fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1px solid #e0deda", background: "#fff", color: "#5a5750", whiteSpace: "nowrap" },
-  cards: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem" },
-  card: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, padding: "0.9rem 1rem", boxShadow: "0 1px 3px rgba(0,0,0,.06)" },
-  cardLbl: { fontSize: 11, color: "#9a978f", marginBottom: 3 },
-  cardVal: { fontSize: 22, fontWeight: 300, letterSpacing: "-0.02em", lineHeight: 1 },
-  cardSub: { fontSize: 11, color: "#9a978f", marginTop: 2 },
-  panel: { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, boxShadow: "0 1px 3px rgba(0,0,0,.06)", overflow: "hidden" },
-  panelHdr: { padding: "0.65rem 1rem", borderBottom: "1px solid #e0deda", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f2f1ee" },
-  panelTtl: { fontSize: 12, fontWeight: 500, color: "#5a5750" },
-  pills: { display: "flex", gap: 4 },
-  pill: { fontSize: 11, padding: "3px 9px", borderRadius: 20, border: "1px solid #e0deda", color: "#9a978f", background: "#fff", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" },
-  pillOn: { fontSize: 11, padding: "3px 9px", borderRadius: 20, border: "1px solid rgba(26,107,74,.18)", color: "#1a6b4a", background: "#e8f5ef", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 },
-  tblWrap: { overflowX: "auto" },
-  th: { background: "#f2f1ee", padding: "7px 11px", fontSize: 11, fontWeight: 500, letterSpacing: "0.04em", color: "#9a978f", textAlign: "left", borderBottom: "1px solid #e0deda", whiteSpace: "nowrap" },
-  thR: { background: "#f2f1ee", padding: "7px 11px", fontSize: 11, fontWeight: 500, letterSpacing: "0.04em", color: "#9a978f", textAlign: "right", borderBottom: "1px solid #e0deda", whiteSpace: "nowrap" },
-  tdBase: { padding: "7px 11px", whiteSpace: "nowrap", verticalAlign: "middle", fontSize: 13, borderBottom: "1px solid #e0deda" },
-  tdR: { padding: "7px 11px", whiteSpace: "nowrap", verticalAlign: "middle", fontSize: 13, textAlign: "right", borderBottom: "1px solid #e0deda" },
-  ts: { display: "flex", justifyContent: "space-between", padding: "5px 11px", background: "#f2f1ee", borderTop: "1px solid #e0deda", fontSize: 11, color: "#9a978f" },
-  noticeInfo: { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#e8f0fb", color: "#2563a8", border: "1px solid rgba(37,99,168,.18)" },
-  noticeWarn: { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#fef3e2", color: "#92600a", border: "1px solid rgba(146,96,10,.2)" },
-  noticeOk:   { display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 6, fontSize: 13, lineHeight: 1.6, background: "#e8f5ef", color: "#1a6b4a", border: "1px solid rgba(26,107,74,.18)" },
-  // Methodology tooltip
-  methodBox: { background: "#f2f1ee", border: "1px solid #e0deda", borderRadius: 6, padding: "0.9rem 1rem", fontSize: 12, color: "#5a5750", lineHeight: 1.75 },
-};
-
 // ── Sub-components ────────────────────────────────────────────────────────────
-function LiveDot() {
-  return <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1a6b4a", display: "inline-block", animation: "blink 2s ease-in-out infinite" }} />;
-}
-
+// Floating status: sits over the content instead of pushing the table down.
 function Notice({ type, children, onDismiss }) {
-  const st = type === "warn" ? s.noticeWarn : type === "ok" ? s.noticeOk : s.noticeInfo;
-  const icons = { info: "ℹ", warn: "⚠", ok: "✓" };
+  const icons = { info: "i", warn: "!", ok: "✓" };
   return (
-    <div style={st}>
-      <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>{icons[type]}</span>
+    <div className="gt-toast" data-type={type} role={type === "warn" ? "alert" : "status"}>
+      <span className="gt-toast-icon" aria-hidden="true">{icons[type]}</span>
       <span style={{ flex: 1 }}>{children}</span>
-      {onDismiss && <span style={{ cursor: "pointer", opacity: 0.6, marginLeft: 8 }} onClick={onDismiss}>✕</span>}
+      {onDismiss && <button type="button" className="gt-toast-close" onClick={onDismiss} aria-label="Dismiss">✕</button>}
     </div>
   );
 }
@@ -126,22 +84,22 @@ function SummaryCards({ data, taxRate, taxProfile }) {
     <div className="gt-cards" style={s.cards}>
       <div style={s.card}>
         <div style={s.cardLbl}>Gilts shown</div>
-        <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{data.length}</div>
+        <div style={{ ...s.cardVal, color: "var(--accent)" }}>{data.length}</div>
         <div style={s.cardSub}>conventional gilts</div>
       </div>
       <div style={s.card}>
         <div style={s.cardLbl}>Highest after-tax YTM</div>
-        <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{best ? best.at.toFixed(3) + "%" : "—"}</div>
+        <div style={{ ...s.cardVal, color: "var(--accent)" }}>{best ? best.at.toFixed(3) + "%" : "—"}</div>
         <div style={{ ...s.cardSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{best ? best.name.replace(" Treasury", "").replace(" Stock", "").trim() : "—"}</div>
       </div>
       <div style={s.card}>
         <div style={s.cardLbl}>Avg tax drag</div>
-        <div style={{ ...s.cardVal, color: "#b91c1c" }}>{solved.length ? `-${avgDrag.toFixed(2)}%` : "—"}</div>
+        <div style={{ ...s.cardVal, color: "var(--neg)" }}>{solved.length ? `-${avgDrag.toFixed(2)}%` : "—"}</div>
         <div style={s.cardSub}>gross minus after-tax</div>
       </div>
       <div style={s.card}>
         <div style={s.cardLbl}>{head ? "Gilt interest before higher rate" : "Tax rate applied"}</div>
-        <div style={{ ...s.cardVal, color: "#1a6b4a" }}>{head ? gbp(head.toThreshold) : `${Math.round(taxRate * 100)}%`}</div>
+        <div style={{ ...s.cardVal, color: "var(--accent)" }}>{head ? gbp(head.toThreshold) : `${Math.round(taxRate * 100)}%`}</div>
         <div style={s.cardSub}>{head ? `a year: ${gbp(head.nil)} at 0%, ${gbp(head.basic)} at basic rate` : "coupons taxable; gains exempt"}</div>
       </div>
     </div>
@@ -160,7 +118,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate, ba
   return (
     <div style={s.panel}>
       <div className="gt-tblWrap" style={s.tblWrap}>
-        <table className="gt-analyser-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table className="gt-table gt-analyser-table" style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
               {[
@@ -202,35 +160,34 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate, ba
           <tbody>
             {unsolved.length > 0 && (
               <tr>
-                <td colSpan={nCols} style={{ ...s.tdBase, background: "#fef3e2", color: "#92600a", fontSize: 12 }}>
+                <td colSpan={nCols} style={{ ...s.tdBase, background: "var(--warn-soft)", color: "var(--warn)", fontSize: "0.75rem" }}>
                   ⚠ No yield between −50% and 100% reprices {unsolved.map(g => g.sym).join(", ")} at the
                   current price and accrued interest — shown as "—". Check the price before relying on it.
                 </td>
               </tr>
             )}
             {data.map((g, i) => {
-              const rowBg = i % 2 === 0 ? "#fff" : "#fafaf9";
               const matLbl = new Date(g.mat).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
               const pct = g.at != null ? Math.max(0, (g.at / maxAt) * 100).toFixed(1) : "0";
-              const dPxCls = g.dPx > 0.005 ? "#1a6b4a" : g.dPx < -0.005 ? "#b91c1c" : "#9a978f";
+              const dPxCls = g.dPx > 0.005 ? "var(--accent)" : g.dPx < -0.005 ? "var(--neg)" : "var(--text-3)";
               const dPxTxt = isLive ? (g.dPx > 0.005 ? `+${g.dPx.toFixed(2)}` : g.dPx < -0.005 ? g.dPx.toFixed(2) : "—") : "—";
               const td = (content, right = false, extra = {}) => (
-                <td style={{ ...(right ? s.tdR : s.tdBase), background: rowBg, ...extra }}>{content}</td>
+                <td style={{ ...(right ? s.tdR : s.tdBase), ...extra }}>{content}</td>
               );
               const isManual = g.priceSource === "manual";
               const settleLbl = g.settlement.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
               return (
                 <Fragment key={g.sym}>
-                <tr>
-                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: "#9a978f" }}>{i + 1}</span>)}
+                <tr className="gt-row">
+                  {td(<span style={{ fontFamily: "var(--font-num)", fontSize: "0.6875rem", color: "var(--text-3)" }}>{i + 1}</span>)}
                   {td(<>
-                    <span style={{ fontSize: 13, color: "#1a1916", maxWidth: 195, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{g.name}</span>
-                    <span className="gt-mobile-only" style={{ fontSize: 11, color: "#9a978f" }}>matures {matLbl}</span>
+                    <span style={{ fontSize: "0.8125rem", color: "var(--text)", maxWidth: 195, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{g.name}</span>
+                    <span className="gt-mobile-only" style={{ fontSize: "0.6875rem", color: "var(--text-3)" }}>matures {matLbl}</span>
                     <span style={{ display: "block", marginTop: 3 }}><BrokerLinks gilt={g} /></span>
                   </>)}
-                  {td(<span style={{ fontFamily: "DM Mono, monospace", color: "#9a978f" }}>{g.c.toFixed(3)}%</span>, true)}
-                  {td(<span style={{ color: "#9a978f" }}>{matLbl}</span>, true)}
-                  {td(<span style={{ color: "#9a978f", fontSize: 12 }}>{g.yrs.toFixed(1)}y</span>, true)}
+                  {td(<span style={{ fontFamily: "var(--font-num)", color: "var(--text-3)" }}>{g.c.toFixed(3)}%</span>, true)}
+                  {td(<span style={{ color: "var(--text-3)" }}>{matLbl}</span>, true)}
+                  {td(<span style={{ color: "var(--text-3)", fontSize: "0.75rem" }}>{g.yrs.toFixed(1)}y</span>, true)}
                   {td(
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       {isManual && (
@@ -239,36 +196,36 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate, ba
                           live
                         </span>
                       )}
-                      <span style={{ fontFamily: "DM Mono, monospace", fontWeight: isManual ? 500 : 400 }}>£{g.cp.toFixed(2)}</span>
+                      <span style={{ fontFamily: "var(--font-num)", fontWeight: isManual ? 500 : 400 }}>£{g.cp.toFixed(2)}</span>
                       <button style={s.editBtn} onClick={() => setEditing(e => (e === g.sym ? null : g.sym))}
                         title="Enter a live price for this gilt (one-off)" aria-label={`Edit price for ${g.name}`}>✎</button>
                     </span>, true)}
-                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: dPxCls }}>{dPxTxt}</span>, true)}
-                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#9a978f" }}>{pctFmt(g.grossYTM)}</span>, true)}
-                  {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 14, fontWeight: 500, color: "#1a6b4a" }}>{pctFmt(g.at)}</strong>, true)}
-                  {td(<strong style={{ fontFamily: "DM Mono, monospace", fontSize: 13, fontWeight: 500, color: "#2563a8" }}>{pctFmt(g.gey)}</strong>, true)}
+                  {td(<span style={{ fontFamily: "var(--font-num)", fontSize: "0.6875rem", color: dPxCls }}>{dPxTxt}</span>, true)}
+                  {td(<span style={{ fontFamily: "var(--font-num)", fontSize: "0.75rem", color: "var(--text-3)" }}>{pctFmt(g.grossYTM)}</span>, true)}
+                  {td(<strong style={{ fontFamily: "var(--font-num)", fontSize: "0.875rem", fontWeight: 500, color: "var(--accent)" }}>{pctFmt(g.at)}</strong>, true)}
+                  {td(<strong style={{ fontFamily: "var(--font-num)", fontSize: "0.8125rem", fontWeight: 500, color: "var(--info)" }}>{pctFmt(g.gey)}</strong>, true)}
                   {banded && td(
-                    <span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#5a5750", cursor: "help" }}
+                    <span style={{ fontFamily: "var(--font-num)", fontSize: "0.75rem", color: "var(--text-2)", cursor: "help" }}
                       title={`${gbp(g.bands.nominal)} nominal pays ${gbp(g.bands.annualInterest)} a year in coupons.\n` +
                         g.bands.byYear.slice(0, 6).map(y => `${y.label}: ${gbp(y.interest)} taxable, ${gbp(y.tax)} tax (${(y.rate * 100).toFixed(1)}%)`).join("\n") +
                         (g.bands.byYear.length > 6 ? `\n… ${g.bands.byYear.length - 6} more years` : "")}>
                       {(g.bands.effRate * 100).toFixed(1)}%
                     </span>, true)}
                   {banded && td(
-                    <span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#5a5750" }}
+                    <span style={{ fontFamily: "var(--font-num)", fontSize: "0.75rem", color: "var(--text-2)" }}
                       title={g.bands.basicCost ? `0% headroom alone: ${gbpShort(g.bands.nilCost)} of this gilt` : undefined}>
                       {g.bands.basicCost ? gbpShort(g.bands.basicCost) : "—"}
                     </span>, true)}
-                  {td(<span style={{ fontFamily: "DM Mono, monospace", fontSize: 12, color: "#b91c1c" }}>{g.drag == null ? "—" : `-${g.drag.toFixed(2)}%`}</span>, true)}
+                  {td(<span style={{ fontFamily: "var(--font-num)", fontSize: "0.75rem", color: "var(--neg)" }}>{g.drag == null ? "—" : `-${g.drag.toFixed(2)}%`}</span>, true)}
                   {td(
-                    <span style={{ display: "inline-block", fontSize: 10, fontWeight: 500, padding: "2px 7px", borderRadius: 12, letterSpacing: "0.03em", ...(g.couponType === "low" ? { background: "#e8f0fb", color: "#2563a8" } : { background: "#fef3e2", color: "#92600a" }) }}>
+                    <span style={{ display: "inline-block", fontSize: "0.6875rem", fontWeight: 500, padding: "2px 7px", borderRadius: 12, letterSpacing: "0.03em", ...(g.couponType === "low" ? { background: "var(--info-soft)", color: "var(--info)" } : { background: "var(--warn-soft)", color: "var(--warn)" }) }}>
                       {g.couponType}
                     </span>, true
                   )}
                   {td(
                     <div style={{ width: 60 }}>
-                      <div style={{ background: "#eae9e5", height: 3, borderRadius: 2, overflow: "hidden" }}>
-                        <div style={{ width: `${pct}%`, height: "100%", background: "#1a6b4a", borderRadius: 2 }} />
+                      <div style={{ background: "var(--track)", height: 3, borderRadius: 2, overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", background: "var(--accent)", borderRadius: 2 }} />
                       </div>
                     </div>, true
                   )}
@@ -288,7 +245,7 @@ function GiltTable({ data, isLive, liveOverrides, manual, setManual, taxRate, ba
         </table>
       </div>
       <div style={s.ts}>
-        <span>{isLive ? "⬤ Live · UK DMO daily reference prices" : `◯ Cached · snapshot ${SNAPSHOT_LABEL}`}</span>
+        <span>{isLive ? "Live · UK DMO daily reference prices" : `Cached · snapshot ${SNAPSHOT_LABEL}`}</span>
         <span>{now}</span>
       </div>
     </div>
@@ -302,13 +259,13 @@ function MethodologyNote({ taxRate, settlement, banded }) {
     <div>
       <button
         onClick={() => setOpen(o => !o)}
-        style={{ ...s.btnRefresh, fontSize: 11, padding: "5px 11px", color: "#9a978f" }}
+        style={s.btnRefresh} aria-expanded={open}
       >
-        {open ? "▲" : "▼"} Methodology
+        Methodology <span aria-hidden="true" style={{ fontSize: "0.6875rem", color: "var(--text-3)" }}>{open ? "▴" : "▾"}</span>
       </button>
       {open && (
-        <div style={{ ...s.methodBox, marginTop: 8 }}>
-          <strong style={{ color: "#1a1916" }}>After-tax YTM</strong> — solved by bisection on the IRR of
+        <div className="gt-reveal" style={{ ...s.methodBox, marginTop: 8 }}>
+          <strong style={{ color: "var(--text)" }}>After-tax YTM</strong> — solved by bisection on the IRR of
           after-tax cash flows using the exact future coupon schedule. Following the DMO yield
           formula, cash flows are discounted in coupon periods (days to next coupon ÷ days in the
           current period, then whole half-years) with semi-annual compounding, so gross YTM is
@@ -320,7 +277,7 @@ function MethodologyNote({ taxRate, settlement, banded }) {
           for the accrued interest paid); on an ex-dividend purchase the next coupon goes to the
           seller and the buyer is taxed on the rebate interest (HMRC SAIM4150).
           <br /><br />
-          <strong style={{ color: "#1a1916" }}>Tax from other income</strong> — instead of one flat
+          <strong style={{ color: "var(--text)" }}>Tax from other income</strong> — instead of one flat
           rate, the amount entered is put into each gilt on its own, its taxable interest is added up
           per tax year and taxed as savings income on top of the other income entered: personal
           allowance (£12,570, tapered above £100,000), starting rate for savings (up to £5,000 at 0%,
@@ -333,20 +290,20 @@ function MethodologyNote({ taxRate, settlement, banded }) {
           modelled. <em>Fills basic band</em> is the cost of the holding whose full-year coupons take
           income exactly to £50,270.
           <br /><br />
-          <strong style={{ color: "#1a1916" }}>Settlement</strong> — accrued interest and yields are
+          <strong style={{ color: "var(--text)" }}>Settlement</strong> — accrued interest and yields are
           for settlement on {settlement.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })},
           the next business day after the price date (T+1), using the DMO clean reference price.
           <br /><br />
-          <strong style={{ color: "#1a1916" }}>Accrued interest</strong> — Actual/Actual day count
+          <strong style={{ color: "var(--text)" }}>Accrued interest</strong> — Actual/Actual day count
           (days elapsed ÷ actual days in coupon period), per UK gilt convention. Within 7 business
           days of a coupon the gilt trades ex-dividend and accrued interest is negative.
           <br /><br />
-          <strong style={{ color: "#1a1916" }}>Deposit Equiv.</strong> — the gross yield a fully-taxable
+          <strong style={{ color: "var(--text)" }}>Deposit Equiv.</strong> — the gross yield a fully-taxable
           deposit or bond would need to match this gilt's after-tax return.
           Formula: <code>after-tax YTM ÷ (1 − tax rate)</code> — a deposit paying that gross rate
           keeps exactly the gilt's after-tax yield once its interest is taxed.
           <br /><br />
-          <strong style={{ color: "#1a1916" }}>Your live prices (✎)</strong> — a price you type in is
+          <strong style={{ color: "var(--text)" }}>Your live prices (✎)</strong> — a price you type in is
           treated as today's dealing price, so it settles T+1 from today: accrued interest and
           ex-dividend status are taken at that date (a dirty price is converted to clean the same
           way), and the DMO file's dirty price is not used for that gilt. One-off: not saved,
@@ -378,7 +335,6 @@ export default function GiltTerminal() {
     typeof window !== "undefined" && window.location.hash.startsWith("#ladder") ? "ladder" : "analyser");
 
   // Band-based tax inputs: page memory only — never persisted, never in the URL.
-  const [showSettings, setShowSettings] = useState(false); // phones: sidebar collapsed by default
   const [taxMode, setTaxMode] = useState("flat");
   const [income, setIncome] = useState("30000");
   const [otherSavings, setOtherSavings] = useState("0");
@@ -474,100 +430,46 @@ export default function GiltTerminal() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const TENOR_PILLS = [
-    { val: "all", label: "All" }, { val: "short", label: "0–5y" },
-    { val: "medium", label: "5–15y" }, { val: "long", label: "15y+" },
-  ];
+  // The header's edge only appears once content scrolls underneath it.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 2);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
-    <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@300;400;500&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        body { margin: 0; }
-        select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239a978f'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px !important; }
-        tr:last-child td { border-bottom: none !important; }
-        tr:hover td { background: #f2f1ee !important; }
-        th[title] { cursor: help; border-bottom: 1px dashed #c0bdb7 !important; }
-        .gt-settings-toggle, .gt-mobile-only { display: none; }
-        .gt-main { min-width: 0; }
-
-        /* Phones and narrow tablets: one column, settings collapsed behind a
-           button, wide tables scroll sideways with the gilt name pinned.
-           Inline styles are overridden, hence !important. */
-        @media (max-width: 820px) {
-          .gt-header { height: auto !important; flex-wrap: wrap; gap: 8px; padding: 8px 12px !important; position: static !important; }
-          .gt-logoSub, .gt-stamp, .gt-livePill { display: none !important; }
-          .gt-infoBar, .gt-manualBar { padding: 7px 12px !important; font-size: 11px !important; }
-          .gt-layout { grid-template-columns: minmax(0, 1fr) !important; }
-          .gt-sidebar { border-right: none !important; border-bottom: 1px solid #e0deda; padding: 10px 12px !important; overflow: visible !important; }
-          .gt-sidebar:not(.gt-open) > *:not(.gt-settings-toggle) { display: none !important; }
-          .gt-settings-toggle { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid #e0deda; border-radius: 6px; background: #fff; color: #1a1916; font: 500 13px 'DM Sans', sans-serif; cursor: pointer; }
-          .gt-main { padding: 12px !important; gap: 12px !important; overflow: visible !important; }
-          .gt-cards { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
-          .gt-cards > div { padding: 10px 12px !important; }
-          .gt-cards > div > div:nth-child(2) { font-size: 18px !important; }
-          .gt-panelHdr { flex-wrap: wrap; gap: 8px; }
-          .gt-panelHdr > div { flex-wrap: wrap; }
-          .gt-tblWrap { -webkit-overflow-scrolling: touch; }
-          .gt-liab-row input { min-width: 0; flex: 1 1 0; width: auto !important; }
-          .gt-liab-row input[type="month"] { flex: 2.4 1 0; }
-          .gt-liab-row input { padding: 7px 8px !important; }
-          .gt-panelHdr input[type="month"] { width: 190px !important; }
-          /* 16px stops iOS zooming the page when a field is focused */
-          input[type="number"], input[type="month"], input[type="date"], input[inputmode], select { font-size: 16px !important; }
-          button { min-height: 32px; }
-          /* Analyser table: drop #, Coupon (in the name), Maturity (shown under the
-             name), Tenor, Δ Price, Type and Relative; pin the gilt name, so price and
-             yields fit beside it */
-          .gt-analyser-table tr > :nth-child(3),
-          .gt-analyser-table tr > :nth-child(4),
-          .gt-analyser-table tr > :nth-child(1):not([colspan]),
-          .gt-analyser-table tr > :nth-child(5),
-          .gt-analyser-table tr > :nth-child(7),
-          .gt-analyser-table tr > :nth-last-child(1):not([colspan]),
-          .gt-analyser-table tr > :nth-last-child(2) { display: none; }
-          .gt-analyser-table tr > :nth-child(2) { position: sticky; left: 0; z-index: 1; box-shadow: 1px 0 0 #e0deda; }
-          .gt-analyser-table tr > :nth-child(2) > span:first-child { max-width: 132px !important; white-space: normal !important; }
-          .gt-analyser-table th, .gt-analyser-table td { padding: 7px 8px !important; }
-          .gt-analyser-table th { white-space: normal !important; vertical-align: bottom; }
-          .gt-mobile-only { display: block !important; }
-        }
-      `}</style>
-
-      <div style={s.wrap}>
-        {/* Header */}
-        <header className="gt-header" style={s.header}>
-          <div style={s.logoWrap}>
-            <div style={s.logoMark}>GT</div>
-            <span style={s.logoText}>Gilt Terminal</span>
-            <span className="gt-logoSub" style={s.logoSub}>after-tax yield analyser</span>
+      <div className="gt-wrap">
+        <header className="gt-header" data-scrolled={scrolled}>
+          <div className="gt-brand">
+            <div className="gt-mark">GT</div>
+            <span className="gt-title">Gilt Terminal</span>
+            <span className="gt-logoSub">after-tax yield analyser</span>
           </div>
-          <div style={s.pills}>
-            {[["analyser", "Analyser"], ["ladder", "Ladder"]].map(([v, label]) => (
-              <button key={v} style={view === v ? s.pillOn : s.pill}
-                onClick={() => {
-                  setView(v);
-                  if (v === "analyser") window.history.replaceState(null, "", window.location.pathname);
-                }}>{label}</button>
-            ))}
-          </div>
-          <div className="gt-hdrRight" style={s.hdrRight}>
-            <span className="gt-stamp" style={s.stamp}>{updateStamp}</span>
-            {isLive && <div className="gt-livePill" style={s.livePill}><LiveDot />&nbsp;Live</div>}
-            <button style={s.btnRefresh} onClick={refresh} disabled={refreshing}>
-              {refreshing
-                ? <span style={{ width: 12, height: 12, border: "2px solid #cbc9c3", borderTopColor: "#5a5750", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
-                : "↻"
-              }&nbsp;Refresh
+          <Segmented ariaLabel="View" options={VIEWS} value={view}
+            onChange={v => {
+              setView(v);
+              if (v === "analyser") window.history.replaceState(null, "", window.location.pathname);
+            }} />
+          <div className="gt-hdrRight">
+            <span className="gt-stamp">
+              {isLive && <span className="gt-dot" title="Live: daily price file loaded" />}
+              {updateStamp}
+            </span>
+            <button style={s.btnRefresh} onClick={refresh} disabled={refreshing} aria-label="Refresh prices">
+              <span aria-hidden="true" style={{ display: "inline-block", width: 14, textAlign: "center", animation: refreshing ? "spin 0.7s linear infinite" : "none" }}>↻</span>
+              <span className="gt-btn-label">Refresh</span>
             </button>
           </div>
         </header>
 
-        <div className="gt-infoBar" style={s.infoBar} role="note">
-          <strong style={{ fontWeight: 500, color: "#1a1916" }}>Information only — not advice or a personal recommendation.</strong>{" "}
+        {notice && (
+          <Notice key={notice.msg} type={notice.type} onDismiss={() => setNotice(null)}>{notice.msg}</Notice>
+        )}
+
+        <div className="gt-infoBar" role="note">
+          <strong style={{ fontWeight: 600, color: "var(--text-2)" }}>Information only — not advice or a personal recommendation.</strong>{" "}
           For investment professionals. A personal project: not operated by or on behalf of any FCA-authorised firm, and not a
           regulated service. Figures are calculations from published prices, which may be stale or wrong — check before relying
           on them. Tax treatment depends on individual circumstances and may change. No affiliation with Hargreaves Lansdown or
@@ -575,12 +477,12 @@ export default function GiltTerminal() {
         </div>
 
         {manualSyms.length > 0 && (
-          <div className="gt-manualBar" style={s.manualBar}>
+          <div className="gt-manualBar">
             <span>
               ✎ Your live price{manualSyms.length > 1 ? "s" : ""} in use for <strong>{manualSyms.join(", ")}</strong> — in the
               analyser and the ladder, this visit only (not saved; cleared on reload).
             </span>
-            <button style={s.editBtn} onClick={() => setManual({})}>Clear all</button>
+            <button style={s.btn} onClick={() => setManual({})}>Clear all</button>
           </div>
         )}
 
@@ -592,17 +494,13 @@ export default function GiltTerminal() {
             liveDirty={liveDirty} dirtySettlement={dirtySettlement}
             manual={manual} setManual={setManual} />
         ) : (
-        <div className="gt-layout" style={s.layout}>
-          {/* Sidebar */}
-          <aside className={"gt-sidebar" + (showSettings ? " gt-open" : "")} style={s.sidebar}>
-            <button className="gt-settings-toggle" onClick={() => setShowSettings(v => !v)} aria-expanded={showSettings}>
-              Tax, filters & data source {showSettings ? "▴" : "▾"}
-            </button>
+        <div className="gt-layout">
+          <SettingsPanel label="Tax, filters & data">
             <div>
               <div style={s.secLbl}>Tax parameters</div>
               <TaxInputs tax={tax} showHolding />
-              <div style={{ fontSize: 12, color: "#5a5750", marginBottom: 4 }}>CGT on gilt gains</div>
-              <div style={{ fontFamily: "DM Mono, monospace", fontSize: 12, fontWeight: 500, color: "#1a6b4a" }}>0% — fully exempt</div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-2)", marginBottom: 4 }}>CGT on gilt gains</div>
+              <div style={{ fontFamily: "var(--font-num)", fontSize: "0.75rem", fontWeight: 500, color: "var(--accent)" }}>0% — fully exempt</div>
             </div>
 
             <hr style={s.hr} />
@@ -612,7 +510,7 @@ export default function GiltTerminal() {
               {[
                 { label: "Maturity range", val: matFilter, set: setMatFilter, opts: [["all","All maturities"],["short","0 – 5 years"],["medium","5 – 15 years"],["long","15+ years"]] },
                 { label: "Coupon type", val: couponFilter, set: setCouponFilter, opts: [["all","All coupons"],["low","Low coupon (≤ 2%)"],["high","High coupon (> 2%)"]] },
-                { label: "Sort by", val: sortBy, set: setSortBy, opts: [["atYTM","After-tax YTM ↓"],["grossYTM","Gross YTM ↓"],["taxDrag","Tax drag ↑"],["maturity","Maturity date ↑"],["cleanPx","Clean price ↑"]] },
+                { label: "Sort by", val: sortBy, set: setSortBy, opts: SORT_OPTS },
               ].map(({ label, val, set, opts }) => (
                 <div key={label} style={{ marginBottom: "0.7rem" }}>
                   <div style={{ ...s.fieldRow, marginBottom: 3 }}><span>{label}</span></div>
@@ -625,47 +523,37 @@ export default function GiltTerminal() {
 
             <hr style={s.hr} />
 
-            <div style={{ fontSize: 12, color: "#5a5750", lineHeight: 1.75 }}>
+            <div style={{ fontSize: "0.75rem", color: "var(--text-2)", lineHeight: 1.75 }}>
               <div style={s.secLbl}>Data source</div>
-              <strong style={{ color: "#1a1916" }}>Live:</strong> UK DMO daily reference prices<br />
-              <strong style={{ color: "#1a1916" }}>Fallback:</strong> snapshot {SNAPSHOT_LABEL}<br />
-              <span style={{ color: "#9a978f", fontSize: 11 }}>
+              <strong style={{ color: "var(--text)" }}>Live:</strong> UK DMO daily reference prices<br />
+              <strong style={{ color: "var(--text)" }}>Fallback:</strong> snapshot {SNAPSHOT_LABEL}<br />
+              <span style={{ color: "var(--text-3)", fontSize: "0.6875rem" }}>
                 Refreshed each weekday after LSE close by GitHub Action.
                 AI uses Actual/Actual day count. YTM uses exact coupon schedule.
-                {asOf && <> Last refresh: <strong style={{ color: "#1a1916" }}>{asOf}</strong>.</>}
+                {asOf && <> Last refresh: <strong style={{ color: "var(--text)" }}>{asOf}</strong>.</>}
               </span>
             </div>
 
             <div style={s.sbFoot}>
               Information only — not advice. Verify prices before dealing.<br />
-              <a href="https://giltsyield.com" target="_blank" rel="noreferrer" style={{ color: "#2563a8" }}>giltsyield.com</a>
+              <a href="https://giltsyield.com" target="_blank" rel="noreferrer" style={{ color: "var(--info)" }}>giltsyield.com</a>
               {" · "}
-              <a href="https://www.dmo.gov.uk" target="_blank" rel="noreferrer" style={{ color: "#2563a8" }}>dmo.gov.uk</a>
+              <a href="https://www.dmo.gov.uk" target="_blank" rel="noreferrer" style={{ color: "var(--info)" }}>dmo.gov.uk</a>
             </div>
-          </aside>
+          </SettingsPanel>
 
-          {/* Main */}
-          <main className="gt-main" style={s.main}>
-            {notice && (
-              <Notice type={notice.type} onDismiss={() => setNotice(null)}>{notice.msg}</Notice>
-            )}
-
+          <main className="gt-main">
             <SummaryCards data={filtered} taxRate={taxRate} taxProfile={analyserProfile} />
 
             <div style={s.panel}>
               <div className="gt-panelHdr" style={s.panelHdr}>
-                <span style={s.panelTtl}>Sorted by after-tax yield to maturity</span>
-                <div style={s.pills}>
-                  {TENOR_PILLS.map(({ val, label }) => (
-                    <button key={val} style={matFilter === val ? s.pillOn : s.pill}
-                      onClick={() => setMatFilter(val)}>{label}</button>
-                  ))}
-                </div>
+                <span style={s.panelTtl}>Sorted by {SORT_TITLES[sortBy]}</span>
+                <Segmented ariaLabel="Maturity range" size="sm" options={TENORS} value={matFilter} onChange={setMatFilter} />
               </div>
               {filtered.length > 0
                 ? <GiltTable data={filtered} isLive={isLive} liveOverrides={basePrices}
                     manual={manual} setManual={setManual} taxRate={taxRate} banded={!!analyserProfile} />
-                : <div style={{ padding: "3rem 2rem", textAlign: "center", color: "#9a978f" }}>No gilts match the current filters.</div>
+                : <div style={{ padding: "3rem 2rem", textAlign: "center", color: "var(--text-3)" }}>No gilts match the current filters.</div>
               }
             </div>
 
@@ -674,6 +562,5 @@ export default function GiltTerminal() {
         </div>
         )}
       </div>
-    </>
   );
 }

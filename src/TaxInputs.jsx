@@ -1,14 +1,10 @@
+import Segmented from "./Segmented.jsx";
+import { s } from "./styles.js";
 import { bandHeadroom, HIGHER_RATE_THRESHOLD } from "./ukTax.js";
 
-const mono = { fontFamily: "DM Mono, monospace" };
-const row = { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#5a5750", marginBottom: 4 };
-const val = { ...mono, fontSize: 12, fontWeight: 500, color: "#1a6b4a" };
-const input = { background: "#fff", border: "1px solid #e0deda", borderRadius: 6, color: "#1a1916", ...mono, fontSize: 13, padding: "7px 10px", width: "100%", outline: "none" };
-const seg = on => ({
-  flex: 1, fontSize: 11, padding: "5px 6px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-  border: "1px solid " + (on ? "rgba(26,107,74,.18)" : "#e0deda"), borderRadius: 6,
-  background: on ? "#e8f5ef" : "#fff", color: on ? "#1a6b4a" : "#9a978f", fontWeight: on ? 500 : 400,
-});
+const row = s.fieldRow;
+const val = s.fieldVal;
+const input = s.inputEl;
 const gbp = n => "£" + Math.round(n).toLocaleString("en-GB");
 
 /**
@@ -32,9 +28,9 @@ export default function TaxInputs({ tax, showHolding = false }) {
   );
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: "0.7rem" }} role="group" aria-label="How coupon tax is worked out">
-        <button style={seg(!bands)} onClick={() => tax.setMode("flat")}>Flat rate</button>
-        <button style={seg(bands)} onClick={() => tax.setMode("bands")}>From other income</button>
+      <div style={{ marginBottom: "0.8rem" }}>
+        <Segmented ariaLabel="How coupon tax is worked out" size="sm" stretch value={tax.mode} onChange={tax.setMode}
+          options={[{ value: "flat", label: "Flat rate" }, { value: "bands", label: "From other income" }]} />
       </div>
       {!bands ? (
         <div style={{ marginBottom: "0.7rem" }}>
@@ -44,7 +40,7 @@ export default function TaxInputs({ tax, showHolding = false }) {
           </div>
           <input type="range" min={0} max={60} step={5} value={Math.round(tax.taxRate * 100)}
             onChange={e => tax.setTaxRate(parseInt(e.target.value) / 100)}
-            style={{ width: "100%", height: 3, accentColor: "#1a6b4a", cursor: "pointer" }} />
+            aria-label="Income tax rate" style={{ width: "100%", cursor: "pointer" }} />
         </div>
       ) : (
         <>
@@ -57,12 +53,12 @@ export default function TaxInputs({ tax, showHolding = false }) {
           {showHolding && field("Amount in each gilt £",
             "Each gilt is shown as if this amount were put into that gilt alone, since the tax depends on how much interest it pays.",
             tax.holding, tax.setHolding, 10000)}
-          <div style={{ fontSize: 11.5, color: "#5a5750", lineHeight: 1.7, background: "#f2f1ee", border: "1px solid #e0deda", borderRadius: 6, padding: "7px 9px", marginBottom: "0.7rem" }}>
+          <div style={{ fontSize: "0.7188rem", color: "var(--text-2)", lineHeight: 1.7, background: "var(--fill)", borderRadius: 10, padding: "9px 11px", marginBottom: "0.7rem" }}>
             Gilt interest a year, on top of that income:
             <div style={row}><span>at 0%</span><span style={val}>first {gbp(head.nil)}</span></div>
             <div style={row}><span>at basic rate</span><span style={val}>next {gbp(head.basic)}</span></div>
             <div style={{ ...row, marginBottom: 0 }}><span>higher rate from</span><span style={val}>{gbp(head.toThreshold)}</span></div>
-            <div style={{ color: "#9a978f", fontSize: 10.5, marginTop: 4, lineHeight: 1.5 }}>
+            <div style={{ color: "var(--text-3)", fontSize: "0.6875rem", marginTop: 4, lineHeight: 1.5 }}>
               Personal allowance, starting rate for savings and personal savings allowance, then the basic
               rate band to {gbp(HIGHER_RATE_THRESHOLD)}. Savings rates 20/40/45%, 24/44/49% from 6 Apr 2027.
               Not saved or shared.
