@@ -325,7 +325,7 @@ function MethodologyNote({ taxRate, settlement, banded }) {
           allowance (£12,570, tapered above £100,000), starting rate for savings (up to £5,000 at 0%,
           reduced by non-savings income above the allowance), personal savings allowance
           (£1,000 / £500 / nil), basic rate to £50,270, higher rate to £125,140. Savings rates are
-          20/40/45% in 2026/27 and 22/42/47% from 6 April 2027; thresholds are held at today's
+          20/40/45% in 2026/27 and 24/44/49% from 6 April 2027; thresholds are held at today's
           figures and other income is assumed the same every year. The tax is the increase caused by
           the gilt interest, so it includes a smaller savings allowance once income crosses £50,270.
           Dividends, Scottish rates on other income and the High Income Child Benefit Charge are not

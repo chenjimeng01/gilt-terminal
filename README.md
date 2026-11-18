@@ -140,7 +140,7 @@ It is directed only at financial advisers and professional and institutional inv
   ladder sidebars) takes the person's other income and other savings interest and taxes
   gilt interest on top of it by band (`src/ukTax.js`): personal allowance (tapered above
   £100,000), starting rate for savings, personal savings allowance, basic rate to
-  £50,270, higher rate to £125,140; savings rates 20/40/45% in 2026/27 and 22/42/47% from
+  £50,270, higher rate to £125,140; savings rates 20/40/45% in 2026/27 and 24/44/49% from
   6 April 2027, thresholds held at today's figures. Taxable interest is summed per tax
   year — per gilt for the amount entered in the analyser, across the whole ladder in the
   ladder — and the tax is the increase the gilt interest causes. The analyser's "Fills

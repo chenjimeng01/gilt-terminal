@@ -64,7 +64,7 @@ export default function TaxInputs({ tax, showHolding = false }) {
             <div style={{ ...row, marginBottom: 0 }}><span>higher rate from</span><span style={val}>{gbp(head.toThreshold)}</span></div>
             <div style={{ color: "#9a978f", fontSize: 10.5, marginTop: 4, lineHeight: 1.5 }}>
               Personal allowance, starting rate for savings and personal savings allowance, then the basic
-              rate band to {gbp(HIGHER_RATE_THRESHOLD)}. Savings rates 20/40/45%, 22/42/47% from 6 Apr 2027.
+              rate band to {gbp(HIGHER_RATE_THRESHOLD)}. Savings rates 20/40/45%, 24/44/49% from 6 Apr 2027.
               Not saved or shared.
             </div>
           </div>

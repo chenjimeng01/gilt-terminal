@@ -23,7 +23,7 @@ test("incomeTax: salary only", () => {
 test("no other income: allowance + starting rate + PSA = £18,570 of interest tax-free", () => {
   near(giltInterestTax(P(0), 18570, 2026), 0);
   near(giltInterestTax(P(0), 19570, 2026), 200);       // next £1,000 at 20%
-  near(giltInterestTax(P(0), 19570, 2027), 220);       // 22% from April 2027
+  near(giltInterestTax(P(0), 19570, 2027), 240);       // 24% from April 2027
 });
 
 test("starting rate for savings is cut by non-savings income above the allowance", () => {
@@ -38,7 +38,7 @@ test("interest straddling £50,270: PSA falls to £500, rest split basic/higher"
   // Salary 49,000 → taxable 36,430. Interest 3,000 sits on 36,430–39,430.
   // PSA 500 (36,430–36,930), basic 770 (to 37,700), higher 1,730.
   near(giltInterestTax(P(49000), 3000, 2026), 770 * 0.2 + 1730 * 0.4);   // 846
-  near(giltInterestTax(P(49000), 3000, 2027), 770 * 0.22 + 1730 * 0.42); // 896
+  near(giltInterestTax(P(49000), 3000, 2027), 770 * 0.24 + 1730 * 0.44); // 946
 });
 
 test("other savings interest uses the allowances first", () => {
@@ -54,7 +54,7 @@ test("personal allowance taper above £100,000 is charged to the gilt interest",
 
 test("additional rate: no PSA", () => {
   near(giltInterestTax(P(150000), 1000, 2026), 450);
-  near(giltInterestTax(P(150000), 1000, 2027), 470);
+  near(giltInterestTax(P(150000), 1000, 2027), 490);
 });
 
 test("bandHeadroom: interest at 0% and up to the £50,270 threshold", () => {
@@ -79,9 +79,9 @@ test("bandSchedule: per-year tax spread evenly over the year's interest", () => 
   const s = bandSchedule(flows, P(30000));
   assert.deepEqual(s.byYear.map(y => y.label), ["2026/27", "2027/28"]);
   near(s.byYear[0].tax, 500 * 0.2);     // 1,500 − PSA 1,000
-  near(s.byYear[1].tax, 2000 * 0.22);   // 3,000 − PSA 1,000
-  near(s.rateAt(new Date("2027-12-07")), 440 / 3000, 1e-9);
-  near(s.tax, 540);
+  near(s.byYear[1].tax, 2000 * 0.24);   // 3,000 − PSA 1,000
+  near(s.rateAt(new Date("2027-12-07")), 480 / 3000, 1e-9);
+  near(s.tax, 580);
 });
 
 test("afterTaxCouponFlows / solveYTM accept a rate function", () => {

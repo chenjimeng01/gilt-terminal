@@ -19,7 +19,7 @@
 //  - Personal savings allowance: £1,000 at 0% if no income is in the higher
 //    band, £500 if some is, nil if any is in the additional band (s.12B).
 //    Both nil-rate amounts use up band space.
-//  - Savings rates 20/40/45% for 2026/27 and 22/42/47% from 6 April 2027
+//  - Savings rates 20/40/45% for 2026/27 and 24/44/49% from 6 April 2027
 //    (Autumn Budget 2025). Allowances and thresholds are frozen to April 2031
 //    and are held at those figures for later years too.
 // Not modelled: dividends (taxed after savings, so gilt interest can push them
@@ -44,7 +44,7 @@ const NON_SAVINGS_RATES = [0.20, 0.40, 0.45];
 
 /** [basic, higher, additional] savings rates for the tax year starting 6 April `tyStart`. */
 export function savingsRates(tyStart) {
-  return tyStart >= 2027 ? [0.22, 0.42, 0.47] : [0.20, 0.40, 0.45];
+  return tyStart >= 2027 ? [0.24, 0.44, 0.49] : [0.20, 0.40, 0.45];
 }
 
 /** Calendar year in which the UK tax year containing `d` starts (6 April, UTC). */
