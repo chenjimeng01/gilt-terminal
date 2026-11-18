@@ -215,6 +215,7 @@ function download(name, text, type) {
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 export default function LadderView({ taxRate, taxProfile = null, taxInputs, liveOverrides, isLive, asOf, snapshotLabel = "", liveDirty = {}, dirtySettlement = null, manual = {}, setManual }) {
+  const [showSettings, setShowSettings] = useState(false); // phones: sidebar collapsed by default
   const [editing, setEditing] = useState(null);
   const [listing, setListing] = useState(null); // rung index whose candidate list is open
   const saved = useMemo(readHash, []);
@@ -293,9 +294,12 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
   const empty = rows.filter(r => Number(r.amount) > 0).length === 0;
 
   return (
-    <div style={s.layout}>
+    <div className="gt-layout" style={s.layout}>
       {/* Sidebar — ladder inputs (§2) */}
-      <aside style={s.sidebar}>
+      <aside className={"gt-sidebar" + (showSettings ? " gt-open" : "")} style={s.sidebar}>
+            <button className="gt-settings-toggle" onClick={() => setShowSettings(v => !v)} aria-expanded={showSettings}>
+              Account, tax & ladder settings {showSettings ? "▴" : "▾"}
+            </button>
         <div>
           <div style={s.secLbl}>Account & tax</div>
           <div style={{ marginBottom: "0.7rem" }}>
@@ -368,7 +372,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
       </aside>
 
       {/* Main */}
-      <main style={s.main}>
+      <main className="gt-main" style={s.main}>
         {empty && (
           <div style={s.noticeInfo}>
             <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>ℹ</span>
@@ -386,7 +390,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
 
         {/* Liabilities editor */}
         <div style={s.panel}>
-          <div style={s.panelHdr}>
+          <div className="gt-panelHdr" style={s.panelHdr}>
             <span style={s.panelTtl}>Liabilities — when you need the money ({rows.length}/{MAX_RUNGS})</span>
             <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#5a5750" }}>
               £<input type="number" style={{ ...s.inputEl, width: 90, padding: "4px 7px" }} value={qf.amount}
@@ -402,7 +406,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
           </div>
           <div style={{ padding: "0.8rem 1rem", display: "flex", flexDirection: "column", gap: 6 }}>
             {rows.map((r, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div key={i} className="gt-liab-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input type="month" style={{ ...s.inputEl, width: 160 }} value={r.date}
                   onChange={e => setRow(i, { date: e.target.value })} />
                 <span style={{ fontSize: 13, color: "#5a5750" }}>£</span>
@@ -420,7 +424,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
         {!empty && (
           <>
             {/* Summary cards + cash benchmark (§3.5) */}
-            <div style={s.cards}>
+            <div className="gt-cards" style={s.cards}>
               <div style={s.card}>
                 <div style={s.cardLbl}>Total cost today</div>
                 <div style={{ ...s.cardVal, color: "#1a1916" }}>{gbp(t.cost)}</div>
@@ -447,7 +451,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
 
             {/* Ladder table (§4.1) */}
             <div style={s.panel}>
-              <div style={s.panelHdr}>
+              <div className="gt-panelHdr" style={s.panelHdr}>
                 <span style={s.panelTtl}>Ladder — {priceStamp}</span>
                 <div style={{ display: "flex", gap: 6 }}>
                   <button style={s.btn} onClick={() => download("gilt-ladder.csv", toCSV(result), "text/csv")}>⇩ CSV</button>
@@ -456,7 +460,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
                   <button style={s.btn} onClick={() => copy("link", window.location.href)}>{copied === "link" ? "✓ Copied" : "Share link"}</button>
                 </div>
               </div>
-              <div style={s.tblWrap}>
+              <div className="gt-tblWrap" style={s.tblWrap}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
@@ -564,7 +568,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
             {/* Cashflow timeline (§4.2) */}
             {filled.length > 0 && (
               <div style={s.panel}>
-                <div style={s.panelHdr}><span style={s.panelTtl}>Cashflow timeline</span></div>
+                <div className="gt-panelHdr" style={s.panelHdr}><span style={s.panelTtl}>Cashflow timeline</span></div>
                 <div style={{ padding: "0.8rem 1rem" }}><CashflowChart result={result} /></div>
               </div>
             )}
@@ -572,7 +576,7 @@ export default function LadderView({ taxRate, taxProfile = null, taxInputs, live
             {/* Surplus income note (§4.3) */}
             {filled.length > 0 && Object.keys(result.surplusByTaxYear).length > 0 && (
               <div style={s.panel}>
-                <div style={s.panelHdr}>
+                <div className="gt-panelHdr" style={s.panelHdr}>
                   <span style={s.panelTtl} title={bands
                     ? "Coupons are taxed as savings income on top of the other income entered: each tax year's taxable interest across the whole ladder goes through the personal allowance, starting rate for savings, personal savings allowance and the rate bands."
                     : "Coupons are savings income; your Personal Savings Allowance and starting rate for savings may cover some of this. Choose 'From other income' under Account & tax to model it."}>
