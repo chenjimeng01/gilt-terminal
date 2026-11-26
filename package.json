@@ -9,8 +9,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "refresh": "node scripts/refresh-gilt-prices.js",
-    "test": "TZ=UTC node --test ladder.test.mjs giltMath.test.mjs refresh.test.mjs ladderP2.test.mjs manualPrices.test.mjs brokerLinks.test.mjs accessGate.test.mjs ukTax.test.mjs spring.test.mjs && TZ=Europe/London node --test ladder.test.mjs giltMath.test.mjs refresh.test.mjs ladderP2.test.mjs manualPrices.test.mjs brokerLinks.test.mjs accessGate.test.mjs ukTax.test.mjs spring.test.mjs",
-    "verify": "node scripts/verify-gilt-prices.js"
+    "test": "TZ=UTC node --test ladder.test.mjs giltMath.test.mjs refresh.test.mjs ladderP2.test.mjs manualPrices.test.mjs brokerLinks.test.mjs accessGate.test.mjs ukTax.test.mjs spring.test.mjs skill.test.mjs && TZ=Europe/London node --test ladder.test.mjs giltMath.test.mjs refresh.test.mjs ladderP2.test.mjs manualPrices.test.mjs brokerLinks.test.mjs accessGate.test.mjs ukTax.test.mjs spring.test.mjs skill.test.mjs",
+    "verify": "node scripts/verify-gilt-prices.js",
+    "build:skill": "node scripts/build-skill.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

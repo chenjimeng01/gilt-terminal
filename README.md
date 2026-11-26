@@ -96,6 +96,23 @@ for one of the alternatives noted at the bottom of that file (Yahoo Finance, BoE
 yield curve, Tradeweb PDFs). The output JSON shape stays the same, so the React
 side never has to change.
 
+## Claude Skill: gilt ladder
+
+`skill/gilt-ladder` packages the ladder engine as a Claude Skill, so Claude (claude.ai,
+including Projects) can build a ladder from a client's year-by-year cash needs and report
+the capital needed today, the after-tax IRR and a funding check for every payout.
+
+```bash
+npm run build:skill
+```
+
+This copies the four engine files and the current price file into the skill and writes
+`dist-skill/gilt-ladder.zip`. Upload that in Claude (Customize → Skills → Upload a skill;
+code execution must be on). Rebuild and re-upload to refresh the bundled prices. With
+`-- --prices-url https://<your-site>/gilt-prices.json` the skill also tries to fetch
+current prices when its sandbox has network access. `skill.test.mjs` checks the skill
+reports exactly what the engine computes.
+
 ## Audience and status
 
 Gilt Terminal is information only: a calculator, not advice or a personal recommendation.

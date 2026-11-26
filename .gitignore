@@ -1,2 +1,9 @@
 node_modules/
 dist/
+
+# Claude Skill build output (scripts/build-skill.mjs)
+skill/gilt-ladder/scripts/engine/
+skill/gilt-ladder/data/
+skill/gilt-ladder/VERSION
+skill/gilt-ladder/config.json
+dist-skill/

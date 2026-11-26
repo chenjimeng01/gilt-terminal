@@ -1,0 +1,53 @@
+{
+  "clientRef": "Client A — essential spending years 1–10",
+  "liabilities": [
+    {
+      "date": "2027-06",
+      "amount": 30750
+    },
+    {
+      "date": "2028-06",
+      "amount": 31519
+    },
+    {
+      "date": "2029-06",
+      "amount": 32307
+    },
+    {
+      "date": "2030-06",
+      "amount": 33114
+    },
+    {
+      "date": "2031-06",
+      "amount": 33942
+    },
+    {
+      "date": "2032-06",
+      "amount": 34791
+    },
+    {
+      "date": "2033-06",
+      "amount": 35661
+    },
+    {
+      "date": "2034-06",
+      "amount": 36552
+    },
+    {
+      "date": "2035-06",
+      "amount": 37466
+    },
+    {
+      "date": "2036-06",
+      "amount": 38403
+    }
+  ],
+  "account": "GIA",
+  "tax": {
+    "otherIncome": 40000,
+    "otherSavings": 0
+  },
+  "sizing": "couponOffset",
+  "selection": "lowCoupon",
+  "cashRate": 0
+}
