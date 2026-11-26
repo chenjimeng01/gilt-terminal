@@ -108,9 +108,11 @@ npm run build:skill
 
 This copies the four engine files and the current price file into the skill and writes
 `dist-skill/gilt-ladder.zip`. Upload that in Claude (Customize → Skills → Upload a skill;
-code execution must be on). Rebuild and re-upload to refresh the bundled prices. With
-`-- --prices-url https://<your-site>/gilt-prices.json` the skill also tries to fetch
-current prices when its sandbox has network access. `skill.test.mjs` checks the skill
+code execution must be on). The skill fetches current prices from
+https://gilt-terminal.vercel.app/gilt-prices.json (Node fetch, then curl, which honours a
+sandbox's HTTPS proxy) and falls back to the bundled copy, saying so in the report, when
+the sandbox can't reach it. Rebuild and re-upload to refresh the bundled copy;
+`-- --prices-url <url>` or `-- --prices-url none` changes or removes the live source. `skill.test.mjs` checks the skill
 reports exactly what the engine computes.
 
 ## Audience and status

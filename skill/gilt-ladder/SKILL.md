@@ -24,7 +24,7 @@ The user is a regulated financial adviser using this for their own client work. 
 3. **Account and tax.** Ask which wrapper holds the gilts:
    - `GIA`: coupons are taxed. Prefer `{"otherIncome": …, "otherSavings": …}`, the client's other taxable income a year (pensions, earnings, rental) and other savings interest, so tax is worked out by UK band. Otherwise use `{"band": "basic"|"higher"|"additional"}` (applies the 2026/27 rate and the higher savings rates from 6 April 2027) or a flat `{"rate": 0.4}` as a last resort.
    - `ISA` / `SIPP`: coupons untaxed. Note for a SIPP that withdrawals are taxed separately; that isn't modelled.
-4. **Prices.** The skill bundles the latest DMO reference prices at build time (see `VERSION`). The script warns if they are more than 4 days old. If the user has a newer `gilt-prices.json`, pass it with `--prices`. If they have dealing (offer) prices from their platform, put them in `"prices": {"EPIC": clean}`.
+4. **Prices.** The script fetches the current DMO reference prices from the Gilt Terminal site (gilt-terminal.vercel.app, refreshed each weekday evening). If it can't, for example because the sandbox has no network access, it uses the copy bundled with the skill and says so in the warnings. The report always states the price date and source; it warns if prices are more than 4 days old. Tell the user if the bundled copy was used. If they have dealing (offer) prices from their platform, put them in `"prices": {"EPIC": clean}`. A `gilt-prices.json` they upload can be passed with `--prices`.
 5. **Write the input file** (format below) and run, from the directory containing this SKILL.md:
 
    ```bash

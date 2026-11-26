@@ -138,3 +138,38 @@ test("command line: Markdown report, JSON and CSV outputs", () => {
   assert.throws(() => execFileSync("node", ["scripts/ladder.mjs", input], { cwd: SKILL.pathname, stdio: "pipe" }), /Input problems/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// ── Price source: live site, fallback to the bundled copy, offline ──────────
+import http from "node:http";
+
+test("prices: fetched live when the URL works, reported as live", async () => {
+  const body = fs.readFileSync(FIXTURE);
+  const srv = http.createServer((_, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(body); });
+  await new Promise(r => srv.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${srv.address().port}/gilt-prices.json`;
+  try {
+    const p = await L.resolvePrices({ url });
+    assert.equal(p.kind, "live");
+    assert.equal(p.asOf, "2026-11-04");
+    assert.equal(p.note, null);
+    const v = L.validateInput(ten(), { today: TODAY });
+    const md = L.renderMarkdown(L.runLadder(v.input, p, { today: TODAY }));
+    assert.match(md, /as of \*\*2026-11-04\*\* \(live from 127\.0\.0\.1/);
+  } finally { srv.close(); }
+});
+
+test("prices: unreachable URL falls back to the bundled copy, with a warning in the report", async () => {
+  const p = await L.resolvePrices({ url: "http://127.0.0.1:9/gilt-prices.json" });
+  assert.equal(p.kind, "bundled");
+  assert.match(p.note, /Could not fetch live prices/);
+  const v = L.validateInput(ten(), { today: TODAY });
+  const res = L.runLadder(v.input, p, { today: TODAY });
+  assert.match(res.warnings[0], /Could not fetch live prices.*bundled with the skill/);
+  assert.match(L.renderMarkdown(res), /\(bundled with the skill\)/);
+});
+
+test("prices: an explicit file or --offline skips the fetch; the build sets the live site URL", async () => {
+  assert.equal((await L.resolvePrices({ file: FIXTURE, url: "http://127.0.0.1:9/x" })).kind, "file");
+  assert.equal((await L.resolvePrices({ url: "http://127.0.0.1:9/x", offline: true })).kind, "bundled");
+  assert.equal(L.configuredPricesUrl(), "https://gilt-terminal.vercel.app/gilt-prices.json");
+});

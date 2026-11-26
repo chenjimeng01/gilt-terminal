@@ -3,9 +3,12 @@
 //
 //   node scripts/ladder.mjs <input.json> [options]
 //
-//   --prices <file>      gilt-prices.json to use (default: the bundled snapshot)
-//   --prices-url <url>   fetch gilt-prices.json from this URL first (falls back
-//                        to the bundled snapshot if the fetch fails)
+//   --prices <file>      gilt-prices.json to use (skips the live fetch)
+//   --prices-url <url>   fetch gilt-prices.json from this URL (default: the
+//                        pricesUrl in config.json, i.e. the Gilt Terminal site)
+//   --offline            don't fetch; use the bundled snapshot
+//   By default the script fetches the live file and falls back to the bundled
+//   snapshot (data/gilt-prices.json) if that fails; the report says which.
 //   --json <file>        also write the full result as JSON
 //   --csv <file>         also write the rung table as CSV
 //   --today <date>       treat this as today (YYYY-MM-DD); default: the real date
@@ -19,6 +22,7 @@
 import fs from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
 import { buildLadder, buildLadderWithBands, solveIRR, toDate } from "./engine/ladderEngine.js";
 import { MASTER } from "./engine/giltUniverse.js";
 import { priceSettlement } from "./engine/giltMath.js";
@@ -131,19 +135,56 @@ export function validateInput(raw, { today = new Date() } = {}) {
 
 // ── Prices ───────────────────────────────────────────────────────────────────
 
-/** Read a gilt-prices.json file; returns { asOf, prices, dirty, settlement, source }. */
-export function loadPrices(file) {
-  const j = JSON.parse(fs.readFileSync(file, "utf8"));
-  if (!j?.prices || typeof j.prices !== "object") throw new Error(`${file} has no "prices" object.`);
-  return { asOf: j.asOf ?? null, prices: j.prices, dirty: j.dirty ?? {}, settlement: j.settlement ?? null, source: j.source ?? file, file };
+function parsePrices(j, origin, kind) {
+  if (!j?.prices || typeof j.prices !== "object") throw new Error(`${origin} has no "prices" object`);
+  return { asOf: j.asOf ?? null, prices: j.prices, dirty: j.dirty ?? {}, settlement: j.settlement ?? null, origin, kind, note: null };
 }
 
-async function fetchPrices(url) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const j = await res.json();
-  if (!j?.prices) throw new Error("no prices in response");
-  return { asOf: j.asOf ?? null, prices: j.prices, dirty: j.dirty ?? {}, settlement: j.settlement ?? null, source: url, file: url };
+/** Read a gilt-prices.json file. */
+export function loadPrices(file, kind = "file") {
+  return parsePrices(JSON.parse(fs.readFileSync(file, "utf8")), file, kind);
+}
+
+/**
+ * Fetch a gilt-prices.json from a URL. Tries Node's fetch, then curl: sandboxes
+ * often reach the internet only through an HTTPS proxy, which curl honours
+ * (HTTPS_PROXY) and Node's fetch does not.
+ */
+export async function fetchPrices(url, { timeoutMs = 15000 } = {}) {
+  const errs = [];
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parsePrices(await res.json(), url, "live");
+  } catch (e) { errs.push(`fetch: ${e.cause?.code || e.message}`); }
+  try {
+    const body = execFileSync("curl", ["-sSfL", "--max-time", String(Math.ceil(timeoutMs / 1000)), url],
+      { stdio: ["ignore", "pipe", "pipe"], maxBuffer: 5e6 }).toString();
+    return parsePrices(JSON.parse(body), url, "live");
+  } catch (e) { errs.push(`curl: ${(e.stderr?.toString().trim() || e.message).split("\n")[0]}`); }
+  throw new Error(errs.join("; "));
+}
+
+/**
+ * Prices to use: an explicit file; else the live URL; else the bundled
+ * snapshot, with a note saying why the live fetch was not used.
+ */
+export async function resolvePrices({ file = null, url = null, offline = false, bundled = DEFAULT_PRICES } = {}) {
+  if (file) return loadPrices(file, "file");
+  if (url && !offline) {
+    try { return await fetchPrices(url); }
+    catch (e) {
+      const p = loadPrices(bundled, "bundled");
+      p.note = `Could not fetch live prices from ${url} (${e.message}); used the prices bundled with the skill, as of ${p.asOf}.`;
+      return p;
+    }
+  }
+  return loadPrices(bundled, "bundled");
+}
+
+/** The live-prices URL from config.json, if set. */
+export function configuredPricesUrl() {
+  try { return JSON.parse(fs.readFileSync(CONFIG, "utf8")).pricesUrl || null; } catch { return null; }
 }
 
 // ── Calculation ──────────────────────────────────────────────────────────────
@@ -219,6 +260,7 @@ export function runLadder(input, priceData, { today = new Date() } = {}) {
   }
 
   const warnings = [...out.warnings];
+  if (priceData.note) warnings.unshift(priceData.note);
   const ageDays = priceData.asOf ? Math.floor((today - new Date(priceData.asOf + "T00:00:00Z")) / 86400000) : null;
   if (ageDays == null) warnings.push("The price file has no date: check the prices before relying on the figures.");
   else if (ageDays > STALE_DAYS) warnings.push(`Prices are ${ageDays} days old (as of ${priceData.asOf}). Re-run with a current price file or the client's dealing prices.`);
@@ -234,7 +276,7 @@ export function runLadder(input, priceData, { today = new Date() } = {}) {
       clientRef: input.clientRef,
       today: iso(today),
       settlement: iso(settle),
-      prices: { asOf: priceData.asOf, source: priceData.source, ageDays, overrides: Object.keys(input.prices) },
+      prices: { asOf: priceData.asOf, kind: priceData.kind, origin: priceData.origin, ageDays, overrides: Object.keys(input.prices) },
       account,
       tax: tax.mode === "flat" ? `flat ${(tax.rate * 100).toFixed(1)}% on coupons`
         : tax.mode === "band" ? `${tax.band}-rate savings band each year (${savingsRates(2026)[BANDS[tax.band]] * 100}% in 2026/27, ${savingsRates(2027)[BANDS[tax.band]] * 100}% from 2027/28)`
@@ -292,7 +334,9 @@ export function renderMarkdown(res) {
   const L = [];
   L.push(`# Gilt ladder${m.clientRef ? ` — ${m.clientRef}` : ""}`);
   L.push("");
-  L.push(`Prices: DMO reference prices as of **${m.prices.asOf ?? "unknown"}**${m.prices.overrides.length ? ` (overridden: ${m.prices.overrides.join(", ")})` : ""} · settlement **${m.settlement}** · ${m.account}, ${m.tax}.`);
+  const src = m.prices.kind === "live" ? `live from ${m.prices.origin.replace(/^https?:\/\//, "")}`
+    : m.prices.kind === "bundled" ? "bundled with the skill" : `from ${m.prices.origin}`;
+  L.push(`Prices: DMO reference prices as of **${m.prices.asOf ?? "unknown"}** (${src})${m.prices.overrides.length ? `, overridden: ${m.prices.overrides.join(", ")}` : ""} · settlement **${m.settlement}** · ${m.account}, ${m.tax}.`);
   L.push("");
   L.push("| | |");
   L.push("|---|---|");
@@ -358,7 +402,8 @@ async function main(argv) {
   const args = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a.startsWith("--")) args[a.slice(2)] = argv[++i];
+    if (a === "--offline") args.offline = true;
+    else if (a.startsWith("--")) args[a.slice(2)] = argv[++i];
     else args._.push(a);
   }
   if (!args._[0]) {
@@ -373,16 +418,11 @@ async function main(argv) {
     process.exit(1);
   }
 
-  let priceData = null;
-  let url = args["prices-url"];
-  if (!url && !args.prices && fs.existsSync(CONFIG)) {
-    try { url = JSON.parse(fs.readFileSync(CONFIG, "utf8")).pricesUrl || null; } catch { url = null; }
-  }
-  if (url) {
-    try { priceData = await fetchPrices(url); }
-    catch (e) { console.error(`Note: could not fetch prices from ${url} (${e.message}); using the bundled file.`); }
-  }
-  if (!priceData) priceData = loadPrices(args.prices ? resolve(args.prices) : DEFAULT_PRICES);
+  const priceData = await resolvePrices({
+    file: args.prices ? resolve(args.prices) : null,
+    url: args["prices-url"] || configuredPricesUrl(),
+    offline: "offline" in args,
+  });
 
   const res = runLadder(v.input, priceData, { today });
   if (args.json) fs.writeFileSync(args.json, JSON.stringify(res, null, 2));
